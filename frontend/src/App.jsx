@@ -15,9 +15,9 @@ const WS_BASE_URL =
 
 
 function App() {
-  // -------------------------------------------------------
+  // =====================================================
   // BACKEND
-  // -------------------------------------------------------
+  // =====================================================
 
   const [
     backendMessage,
@@ -27,9 +27,9 @@ function App() {
   );
 
 
-  // -------------------------------------------------------
+  // =====================================================
   // USER
-  // -------------------------------------------------------
+  // =====================================================
 
   const [
     displayName,
@@ -37,9 +37,9 @@ function App() {
   ] = useState("");
 
 
-  // -------------------------------------------------------
+  // =====================================================
   // CREATE ROOM
-  // -------------------------------------------------------
+  // =====================================================
 
   const [
     roomCode,
@@ -57,9 +57,9 @@ function App() {
   ] = useState(false);
 
 
-  // -------------------------------------------------------
+  // =====================================================
   // JOIN ROOM
-  // -------------------------------------------------------
+  // =====================================================
 
   const [
     joinCode,
@@ -77,9 +77,9 @@ function App() {
   ] = useState(false);
 
 
-  // -------------------------------------------------------
+  // =====================================================
   // ACTIVE ROOM
-  // -------------------------------------------------------
+  // =====================================================
 
   const [
     currentRoom,
@@ -99,9 +99,9 @@ function App() {
   );
 
 
-  // -------------------------------------------------------
-  // MUSIC
-  // -------------------------------------------------------
+  // =====================================================
+  // MUSIC UPLOAD
+  // =====================================================
 
   const [
     selectedFile,
@@ -118,15 +118,50 @@ function App() {
     setIsUploading,
   ] = useState(false);
 
+
+  // =====================================================
+  // SHARED QUEUE
+  // =====================================================
+
   const [
     queue,
     setQueue,
   ] = useState([]);
 
 
-  // -------------------------------------------------------
-  // REFS
-  // -------------------------------------------------------
+  // =====================================================
+  // AUDIO PLAYER
+  // =====================================================
+
+  const [
+    currentSong,
+    setCurrentSong,
+  ] = useState(null);
+
+  const [
+    isPlaying,
+    setIsPlaying,
+  ] = useState(false);
+
+  const [
+    currentTime,
+    setCurrentTime,
+  ] = useState(0);
+
+  const [
+    duration,
+    setDuration,
+  ] = useState(0);
+
+  const [
+    playerMessage,
+    setPlayerMessage,
+  ] = useState("");
+
+
+  // =====================================================
+  // REFERENCES
+  // =====================================================
 
   const socketRef =
     useRef(null);
@@ -134,38 +169,35 @@ function App() {
   const fileInputRef =
     useRef(null);
 
+  const audioRef =
+    useRef(null);
 
-  // -------------------------------------------------------
-  // CHECK BACKEND
-  // -------------------------------------------------------
+
+  // =====================================================
+  // BACKEND STATUS
+  // =====================================================
 
   useEffect(() => {
-
     fetch(
       `${API_BASE_URL}/api/status`
     )
       .then((response) => {
-
         if (!response.ok) {
-
           throw new Error(
             "Backend status request failed"
           );
-
         }
 
         return response.json();
-
       })
-      .then((data) => {
 
+      .then((data) => {
         setBackendMessage(
           data.message
         );
-
       })
-      .catch((error) => {
 
+      .catch((error) => {
         console.error(
           "Backend connection error:",
           error
@@ -174,52 +206,70 @@ function App() {
         setBackendMessage(
           "Failed to connect to backend"
         );
-
       });
-
   }, []);
 
 
-  // -------------------------------------------------------
-  // CLEANUP WEBSOCKET
-  // -------------------------------------------------------
+  // =====================================================
+  // CLEAN UP WEBSOCKET
+  // =====================================================
 
   useEffect(() => {
-
     return () => {
-
       if (socketRef.current) {
-
         socketRef.current.close();
-
       }
-
     };
-
   }, []);
 
 
-  // -------------------------------------------------------
+  // =====================================================
+  // FORMAT AUDIO TIME
+  // =====================================================
+
+  const formatTime = (
+    seconds
+  ) => {
+    if (
+      !Number.isFinite(seconds)
+      ||
+      seconds < 0
+    ) {
+      return "0:00";
+    }
+
+    const minutes =
+      Math.floor(
+        seconds / 60
+      );
+
+    const remainingSeconds =
+      Math.floor(
+        seconds % 60
+      );
+
+    return `${minutes}:${remainingSeconds
+      .toString()
+      .padStart(2, "0")}`;
+  };
+
+
+  // =====================================================
   // CONNECT TO ROOM
-  // -------------------------------------------------------
+  // =====================================================
 
   const connectToRoom = (
     code,
     name
   ) => {
-
     if (socketRef.current) {
-
       socketRef.current.close();
-
       socketRef.current = null;
-
     }
 
-
     setMembers([]);
-
     setQueue([]);
+    setCurrentSong(null);
 
     setConnectionStatus(
       "Connecting..."
@@ -238,12 +288,11 @@ function App() {
       socket;
 
 
-    // -----------------------------------------------------
+    // ---------------------------------------------------
     // OPEN
-    // -----------------------------------------------------
+    // ---------------------------------------------------
 
     socket.onopen = () => {
-
       console.log(
         "WebSocket connected"
       );
@@ -255,25 +304,21 @@ function App() {
       setConnectionStatus(
         "Connected"
       );
-
     };
 
 
-    // -----------------------------------------------------
+    // ---------------------------------------------------
     // MESSAGE
-    // -----------------------------------------------------
+    // ---------------------------------------------------
 
     socket.onmessage = (
       event
     ) => {
-
       try {
-
         const data =
           JSON.parse(
             event.data
           );
-
 
         console.log(
           "WebSocket message:",
@@ -289,7 +334,6 @@ function App() {
           data.type ===
           "connected"
         ) {
-
           setCurrentRoom(
             data.room_code
           );
@@ -297,23 +341,23 @@ function App() {
           setConnectionStatus(
             "Connected"
           );
-
         }
 
 
         // -----------------------------------------------
-        // ROOM STATE
+        // INITIAL ROOM STATE
         // -----------------------------------------------
 
         if (
           data.type ===
           "room_state"
         ) {
+          const roomQueue =
+            data.room.queue || [];
 
           setQueue(
-            data.room.queue || []
+            roomQueue
           );
-
         }
 
 
@@ -325,11 +369,9 @@ function App() {
           data.type ===
           "members_updated"
         ) {
-
           setMembers(
             data.members
           );
-
         }
 
 
@@ -341,11 +383,9 @@ function App() {
           data.type ===
           "queue_updated"
         ) {
-
           setQueue(
             data.queue
           );
-
         }
 
 
@@ -357,7 +397,6 @@ function App() {
           data.type ===
           "error"
         ) {
-
           setJoinMessage(
             data.message
           );
@@ -365,29 +404,24 @@ function App() {
           setConnectionStatus(
             "Disconnected"
           );
-
         }
 
       } catch (error) {
-
         console.error(
           "Failed to read WebSocket message:",
           error
         );
-
       }
-
     };
 
 
-    // -----------------------------------------------------
+    // ---------------------------------------------------
     // ERROR
-    // -----------------------------------------------------
+    // ---------------------------------------------------
 
     socket.onerror = (
       error
     ) => {
-
       console.error(
         "WebSocket error:",
         error
@@ -396,18 +430,16 @@ function App() {
       setConnectionStatus(
         "Connection Error"
       );
-
     };
 
 
-    // -----------------------------------------------------
+    // ---------------------------------------------------
     // CLOSE
-    // -----------------------------------------------------
+    // ---------------------------------------------------
 
     socket.onclose = (
       event
     ) => {
-
       console.log(
         "WebSocket disconnected",
         event.code,
@@ -417,42 +449,35 @@ function App() {
       setConnectionStatus(
         "Disconnected"
       );
-
     };
-
   };
 
 
-  // -------------------------------------------------------
+  // =====================================================
   // CREATE ROOM
-  // -------------------------------------------------------
+  // =====================================================
 
   const createRoom =
     async () => {
-
       const name =
         displayName.trim();
 
 
       if (!name) {
-
         setRoomMessage(
           "Please enter your name first"
         );
 
         return;
-
       }
 
 
       try {
-
         setIsCreatingRoom(
           true
         );
 
         setRoomMessage("");
-
         setRoomCode("");
 
 
@@ -470,12 +495,10 @@ function App() {
 
 
         if (!response.ok) {
-
           throw new Error(
             data.detail ||
               "Failed to create room"
           );
-
         }
 
 
@@ -498,7 +521,6 @@ function App() {
         );
 
       } catch (error) {
-
         console.error(
           "Create room error:",
           error
@@ -509,35 +531,29 @@ function App() {
         );
 
       } finally {
-
         setIsCreatingRoom(
           false
         );
-
       }
-
     };
 
 
-  // -------------------------------------------------------
+  // =====================================================
   // JOIN ROOM
-  // -------------------------------------------------------
+  // =====================================================
 
   const joinRoom =
     async () => {
-
       const name =
         displayName.trim();
 
 
       if (!name) {
-
         setJoinMessage(
           "Please enter your name first"
         );
 
         return;
-
       }
 
 
@@ -548,18 +564,15 @@ function App() {
 
 
       if (!code) {
-
         setJoinMessage(
           "Please enter a room code"
         );
 
         return;
-
       }
 
 
       try {
-
         setIsJoiningRoom(
           true
         );
@@ -578,12 +591,10 @@ function App() {
 
 
         if (!response.ok) {
-
           throw new Error(
             data.detail ||
               "Room not found"
           );
-
         }
 
 
@@ -598,7 +609,6 @@ function App() {
         );
 
       } catch (error) {
-
         console.error(
           "Join room error:",
           error
@@ -609,24 +619,20 @@ function App() {
         );
 
       } finally {
-
         setIsJoiningRoom(
           false
         );
-
       }
-
     };
 
 
-  // -------------------------------------------------------
-  // SELECT AUDIO FILE
-  // -------------------------------------------------------
+  // =====================================================
+  // SELECT FILE
+  // =====================================================
 
   const handleFileChange = (
     event
   ) => {
-
     const file =
       event.target.files[0];
 
@@ -635,13 +641,11 @@ function App() {
 
 
     if (!file) {
-
       setSelectedFile(
         null
       );
 
       return;
-
     }
 
 
@@ -652,7 +656,6 @@ function App() {
     if (
       file.size > maxSize
     ) {
-
       setSelectedFile(
         null
       );
@@ -661,52 +664,44 @@ function App() {
         "File is too large. Maximum size is 25 MB."
       );
 
-
-      event.target.value = "";
+      event.target.value =
+        "";
 
       return;
-
     }
 
 
     setSelectedFile(
       file
     );
-
   };
 
 
-  // -------------------------------------------------------
-  // UPLOAD AUDIO
-  // -------------------------------------------------------
+  // =====================================================
+  // UPLOAD SONG
+  // =====================================================
 
   const uploadSong =
     async () => {
-
       if (!selectedFile) {
-
         setUploadMessage(
           "Please select an audio file"
         );
 
         return;
-
       }
 
 
       if (!currentRoom) {
-
         setUploadMessage(
           "You are not connected to a room"
         );
 
         return;
-
       }
 
 
       try {
-
         setIsUploading(
           true
         );
@@ -747,12 +742,10 @@ function App() {
 
 
         if (!response.ok) {
-
           throw new Error(
             data.detail ||
               "Failed to upload song"
           );
-
         }
 
 
@@ -769,14 +762,11 @@ function App() {
         if (
           fileInputRef.current
         ) {
-
           fileInputRef.current.value =
             "";
-
         }
 
       } catch (error) {
-
         console.error(
           "Upload error:",
           error
@@ -788,77 +778,439 @@ function App() {
         );
 
       } finally {
-
         setIsUploading(
           false
         );
-
       }
-
     };
 
 
-  // -------------------------------------------------------
-  // LEAVE ROOM
-  // -------------------------------------------------------
+  // =====================================================
+  // LOAD SONG INTO PLAYER
+  // =====================================================
 
-  const leaveRoom = () => {
-
-    if (socketRef.current) {
-
-      socketRef.current.close();
-
-      socketRef.current =
-        null;
-
+  const loadSong = (
+    song
+  ) => {
+    if (!song) {
+      return;
     }
 
 
-    setCurrentRoom("");
-
-    setMembers([]);
-
-    setQueue([]);
-
-    setConnectionStatus(
-      "Disconnected"
-    );
-
-    setJoinCode("");
-
-    setJoinMessage("");
-
-    setRoomCode("");
-
-    setRoomMessage("");
-
-    setSelectedFile(
-      null
-    );
-
-    setUploadMessage("");
+    const audio =
+      audioRef.current;
 
 
     if (
-      fileInputRef.current
+      audio
+      &&
+      !audio.paused
     ) {
-
-      fileInputRef.current.value =
-        "";
-
+      audio.pause();
     }
 
+
+    setCurrentSong(
+      song
+    );
+
+    setIsPlaying(
+      false
+    );
+
+    setCurrentTime(
+      0
+    );
+
+    setDuration(
+      0
+    );
+
+    setPlayerMessage(
+      `Loaded "${song.title}"`
+    );
   };
 
 
-  // -------------------------------------------------------
+  // =====================================================
+  // PLAY / PAUSE
+  // =====================================================
+
+  const togglePlayPause =
+    async () => {
+      if (!currentSong) {
+        setPlayerMessage(
+          "Select a song from the queue first"
+        );
+
+        return;
+      }
+
+
+      const audio =
+        audioRef.current;
+
+
+      if (!audio) {
+        return;
+      }
+
+
+      try {
+        if (audio.paused) {
+          await audio.play();
+
+          setIsPlaying(
+            true
+          );
+
+          setPlayerMessage(
+            ""
+          );
+
+        } else {
+          audio.pause();
+
+          setIsPlaying(
+            false
+          );
+        }
+
+      } catch (error) {
+        console.error(
+          "Audio playback error:",
+          error
+        );
+
+        setPlayerMessage(
+          "Unable to play this audio file"
+        );
+      }
+    };
+
+
+  // =====================================================
+  // SEEK
+  // =====================================================
+
+  const handleSeek = (
+    event
+  ) => {
+    const value =
+      Number(
+        event.target.value
+      );
+
+
+    const audio =
+      audioRef.current;
+
+
+    if (!audio) {
+      return;
+    }
+
+
+    audio.currentTime =
+      value;
+
+
+    setCurrentTime(
+      value
+    );
+  };
+
+
+  // =====================================================
+  // PREVIOUS SONG
+  // =====================================================
+
+  const playPreviousSong =
+    () => {
+      if (
+        queue.length === 0
+      ) {
+        return;
+      }
+
+
+      if (!currentSong) {
+        loadSong(
+          queue[0]
+        );
+
+        return;
+      }
+
+
+      const currentIndex =
+        queue.findIndex(
+          (song) =>
+            song.id ===
+            currentSong.id
+        );
+
+
+      if (
+        currentIndex <= 0
+      ) {
+        loadSong(
+          queue[
+            queue.length - 1
+          ]
+        );
+
+        return;
+      }
+
+
+      loadSong(
+        queue[
+          currentIndex - 1
+        ]
+      );
+    };
+
+
+  // =====================================================
+  // NEXT SONG
+  // =====================================================
+
+  const playNextSong =
+    () => {
+      if (
+        queue.length === 0
+      ) {
+        return;
+      }
+
+
+      if (!currentSong) {
+        loadSong(
+          queue[0]
+        );
+
+        return;
+      }
+
+
+      const currentIndex =
+        queue.findIndex(
+          (song) =>
+            song.id ===
+            currentSong.id
+        );
+
+
+      if (
+        currentIndex === -1
+        ||
+        currentIndex ===
+          queue.length - 1
+      ) {
+        loadSong(
+          queue[0]
+        );
+
+        return;
+      }
+
+
+      loadSong(
+        queue[
+          currentIndex + 1
+        ]
+      );
+    };
+
+
+  // =====================================================
+  // AUDIO METADATA
+  // =====================================================
+
+  const handleLoadedMetadata =
+    () => {
+      const audio =
+        audioRef.current;
+
+
+      if (!audio) {
+        return;
+      }
+
+
+      setDuration(
+        Number.isFinite(
+          audio.duration
+        )
+          ? audio.duration
+          : 0
+      );
+    };
+
+
+  // =====================================================
+  // AUDIO TIME UPDATE
+  // =====================================================
+
+  const handleTimeUpdate =
+    () => {
+      const audio =
+        audioRef.current;
+
+
+      if (!audio) {
+        return;
+      }
+
+
+      setCurrentTime(
+        audio.currentTime
+      );
+    };
+
+
+  // =====================================================
+  // AUDIO PLAY
+  // =====================================================
+
+  const handleAudioPlay =
+    () => {
+      setIsPlaying(
+        true
+      );
+  };
+
+
+  // =====================================================
+  // AUDIO PAUSE
+  // =====================================================
+
+  const handleAudioPause =
+    () => {
+      setIsPlaying(
+        false
+      );
+  };
+
+
+  // =====================================================
+  // SONG FINISHED
+  // =====================================================
+
+  const handleSongEnded =
+    () => {
+      setIsPlaying(
+        false
+      );
+
+
+      if (
+        queue.length > 1
+      ) {
+        playNextSong();
+      }
+    };
+
+
+  // =====================================================
+  // AUDIO ERROR
+  // =====================================================
+
+  const handleAudioError =
+    () => {
+      setIsPlaying(
+        false
+      );
+
+      setPlayerMessage(
+        "Could not load this audio file"
+      );
+  };
+
+
+  // =====================================================
+  // LEAVE ROOM
+  // =====================================================
+
+  const leaveRoom =
+    () => {
+      if (socketRef.current) {
+        socketRef.current.close();
+
+        socketRef.current =
+          null;
+      }
+
+
+      if (
+        audioRef.current
+      ) {
+        audioRef.current.pause();
+
+        audioRef.current.currentTime =
+          0;
+      }
+
+
+      setCurrentRoom("");
+
+      setMembers([]);
+
+      setQueue([]);
+
+      setCurrentSong(
+        null
+      );
+
+      setIsPlaying(
+        false
+      );
+
+      setCurrentTime(
+        0
+      );
+
+      setDuration(
+        0
+      );
+
+      setPlayerMessage("");
+
+      setConnectionStatus(
+        "Disconnected"
+      );
+
+      setJoinCode("");
+
+      setJoinMessage("");
+
+      setRoomCode("");
+
+      setRoomMessage("");
+
+      setSelectedFile(
+        null
+      );
+
+      setUploadMessage("");
+
+
+      if (
+        fileInputRef.current
+      ) {
+        fileInputRef.current.value =
+          "";
+      }
+    };
+
+
+  // =====================================================
   // ACTIVE ROOM SCREEN
-  // -------------------------------------------------------
+  // =====================================================
 
   if (currentRoom) {
-
     return (
-
       <main className="app">
 
         <section className="hero">
@@ -914,9 +1266,13 @@ function App() {
           </div>
 
 
+          {/* =============================================
+              MEMBERS
+          ============================================= */}
+
           <section className="members-section">
 
-            <div className="members-heading">
+            <div className="section-heading">
 
               <h3>
                 Members
@@ -971,6 +1327,10 @@ function App() {
 
           </section>
 
+
+          {/* =============================================
+              UPLOAD
+          ============================================= */}
 
           <section className="upload-section">
 
@@ -1034,9 +1394,7 @@ function App() {
             {uploadMessage && (
 
               <p className="upload-message">
-
                 {uploadMessage}
-
               </p>
 
             )}
@@ -1044,9 +1402,200 @@ function App() {
           </section>
 
 
+          {/* =============================================
+              PLAYER
+          ============================================= */}
+
+          <section className="player-section">
+
+            <div className="section-heading">
+
+              <h3>
+                Music Player
+              </h3>
+
+            </div>
+
+
+            {!currentSong ? (
+
+              <div className="player-empty">
+
+                <p>
+                  Select a song from
+                  the shared queue to
+                  start listening.
+                </p>
+
+              </div>
+
+            ) : (
+
+              <div className="player">
+
+                <div className="now-playing">
+
+                  <div className="music-icon">
+                    ♪
+                  </div>
+
+
+                  <div className="now-playing-info">
+
+                    <small>
+                      Now Playing
+                    </small>
+
+                    <strong>
+                      {currentSong.title}
+                    </strong>
+
+                    <span>
+                      Uploaded by{" "}
+                      {currentSong.uploaded_by}
+                    </span>
+
+                  </div>
+
+                </div>
+
+
+                <audio
+                  ref={audioRef}
+                  src={
+                    `${API_BASE_URL}${currentSong.url}`
+                  }
+                  preload="metadata"
+                  onLoadedMetadata={
+                    handleLoadedMetadata
+                  }
+                  onTimeUpdate={
+                    handleTimeUpdate
+                  }
+                  onPlay={
+                    handleAudioPlay
+                  }
+                  onPause={
+                    handleAudioPause
+                  }
+                  onEnded={
+                    handleSongEnded
+                  }
+                  onError={
+                    handleAudioError
+                  }
+                />
+
+
+                <div className="progress-area">
+
+                  <span>
+                    {formatTime(
+                      currentTime
+                    )}
+                  </span>
+
+
+                  <input
+                    className="seek-slider"
+                    type="range"
+                    min="0"
+                    max={
+                      duration || 0
+                    }
+                    step="0.1"
+                    value={
+                      Math.min(
+                        currentTime,
+                        duration || 0
+                      )
+                    }
+                    onChange={
+                      handleSeek
+                    }
+                    disabled={
+                      !duration
+                    }
+                  />
+
+
+                  <span>
+                    {formatTime(
+                      duration
+                    )}
+                  </span>
+
+                </div>
+
+
+                <div className="player-controls">
+
+                  <button
+                    className="control-button"
+                    onClick={
+                      playPreviousSong
+                    }
+                    disabled={
+                      queue.length === 0
+                    }
+                    title="Previous song"
+                  >
+                    Previous
+                  </button>
+
+
+                  <button
+                    className="play-button"
+                    onClick={
+                      togglePlayPause
+                    }
+                  >
+
+                    {isPlaying
+                      ? "Pause"
+                      : "Play"}
+
+                  </button>
+
+
+                  <button
+                    className="control-button"
+                    onClick={
+                      playNextSong
+                    }
+                    disabled={
+                      queue.length === 0
+                    }
+                    title="Next song"
+                  >
+                    Next
+                  </button>
+
+                </div>
+
+              </div>
+
+            )}
+
+
+            {playerMessage && (
+
+              <p className="player-message">
+                {playerMessage}
+              </p>
+
+            )}
+
+          </section>
+
+
+          {/* =============================================
+              QUEUE
+          ============================================= */}
+
           <section className="queue-section">
 
-            <div className="queue-heading">
+            <div className="section-heading">
 
               <h3>
                 Shared Queue
@@ -1076,53 +1625,85 @@ function App() {
                   (
                     song,
                     index
-                  ) => (
+                  ) => {
 
-                    <div
-                      className="queue-item"
-                      key={song.id}
-                    >
-
-                      <div className="queue-number">
-
-                        {index + 1}
-
-                      </div>
+                    const isCurrent =
+                      currentSong?.id ===
+                      song.id;
 
 
-                      <div className="song-information">
+                    return (
 
-                        <strong>
-                          {song.title}
-                        </strong>
+                      <button
+                        type="button"
+                        className={
+                          isCurrent
+                            ? "queue-item queue-item-active"
+                            : "queue-item"
+                        }
+                        key={song.id}
+                        onClick={() =>
+                          loadSong(
+                            song
+                          )
+                        }
+                      >
 
-                        <span>
+                        <div className="queue-number">
 
-                          Uploaded by{" "}
+                          {isCurrent
+                            ? "♪"
+                            : index + 1}
 
-                          {song.uploaded_by}
+                        </div>
+
+
+                        <div className="song-information">
+
+                          <strong>
+                            {song.title}
+                          </strong>
+
+
+                          <span>
+
+                            Uploaded by{" "}
+
+                            {song.uploaded_by}
+
+                          </span>
+
+
+                          <small>
+
+                            {(
+                              song.size_bytes
+                              /
+                              1024
+                              /
+                              1024
+                            ).toFixed(2)}{" "}
+
+                            MB
+
+                          </small>
+
+                        </div>
+
+
+                        <span className="queue-action">
+
+                          {isCurrent
+                            ? "Selected"
+                            : "Select"}
 
                         </span>
 
-                        <small>
+                      </button>
 
-                          {(
-                            song.size_bytes
-                            /
-                            1024
-                            /
-                            1024
-                          ).toFixed(2)}{" "}
+                    );
 
-                          MB
-
-                        </small>
-
-                      </div>
-
-                    </div>
-
-                  )
+                  }
                 )}
 
               </div>
@@ -1132,18 +1713,19 @@ function App() {
           </section>
 
 
-          <section className="coming-next">
+          <section className="stage-note">
 
             <h3>
-              Synchronized Player
+              Current Stage
             </h3>
 
             <p>
-              The shared queue is now
-              real-time. Play, pause,
-              seek and synchronized
-              playback will be added
-              in the next stage.
+              Playback is currently
+              local to each browser.
+              Real-time synchronized
+              play, pause, seek and
+              song changes will be
+              added next.
             </p>
 
           </section>
@@ -1151,18 +1733,15 @@ function App() {
         </section>
 
       </main>
-
     );
-
   }
 
 
-  // -------------------------------------------------------
+  // =====================================================
   // HOME SCREEN
-  // -------------------------------------------------------
+  // =====================================================
 
   return (
-
     <main className="app">
 
       <section className="hero">
@@ -1258,9 +1837,7 @@ function App() {
         {roomMessage && (
 
           <p className="room-message">
-
             {roomMessage}
-
           </p>
 
         )}
@@ -1317,9 +1894,7 @@ function App() {
         {joinMessage && (
 
           <p className="join-message">
-
             {joinMessage}
-
           </p>
 
         )}
@@ -1327,9 +1902,7 @@ function App() {
       </section>
 
     </main>
-
   );
-
 }
 
 
