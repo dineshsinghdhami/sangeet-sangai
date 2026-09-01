@@ -31,7 +31,7 @@ Friends can create temporary music rooms, share room codes, upload songs tempora
 
 ## # Live Demo
 
-https://dhamielectronics.pythonanywhere.com/
+https://......pythonanywhere.com/
 
 ## # Tech Stack
 
