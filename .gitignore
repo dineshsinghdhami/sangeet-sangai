@@ -21,3 +21,5 @@ backend/uploads/
 # Operating system
 .DS_Store
 Thumbs.db
+
+venv/
