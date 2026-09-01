@@ -7,50 +7,165 @@ import {
 import "./App.css";
 
 
+const API_BASE_URL =
+  "http://127.0.0.1:8000";
+
+const WS_BASE_URL =
+  "ws://127.0.0.1:8000";
+
+
 function App() {
-  const [backendMessage, setBackendMessage] = useState(
+  // -------------------------------------------------------
+  // BACKEND
+  // -------------------------------------------------------
+
+  const [
+    backendMessage,
+    setBackendMessage,
+  ] = useState(
     "Connecting to backend..."
   );
 
-  const [displayName, setDisplayName] = useState("");
 
-  const [roomCode, setRoomCode] = useState("");
-  const [roomMessage, setRoomMessage] = useState("");
-  const [isCreatingRoom, setIsCreatingRoom] = useState(false);
+  // -------------------------------------------------------
+  // USER
+  // -------------------------------------------------------
 
-  const [joinCode, setJoinCode] = useState("");
-  const [joinMessage, setJoinMessage] = useState("");
-  const [isJoiningRoom, setIsJoiningRoom] = useState(false);
+  const [
+    displayName,
+    setDisplayName,
+  ] = useState("");
 
-  const [currentRoom, setCurrentRoom] = useState("");
-  const [members, setMembers] = useState([]);
 
-  const [connectionStatus, setConnectionStatus] = useState(
+  // -------------------------------------------------------
+  // CREATE ROOM
+  // -------------------------------------------------------
+
+  const [
+    roomCode,
+    setRoomCode,
+  ] = useState("");
+
+  const [
+    roomMessage,
+    setRoomMessage,
+  ] = useState("");
+
+  const [
+    isCreatingRoom,
+    setIsCreatingRoom,
+  ] = useState(false);
+
+
+  // -------------------------------------------------------
+  // JOIN ROOM
+  // -------------------------------------------------------
+
+  const [
+    joinCode,
+    setJoinCode,
+  ] = useState("");
+
+  const [
+    joinMessage,
+    setJoinMessage,
+  ] = useState("");
+
+  const [
+    isJoiningRoom,
+    setIsJoiningRoom,
+  ] = useState(false);
+
+
+  // -------------------------------------------------------
+  // ACTIVE ROOM
+  // -------------------------------------------------------
+
+  const [
+    currentRoom,
+    setCurrentRoom,
+  ] = useState("");
+
+  const [
+    members,
+    setMembers,
+  ] = useState([]);
+
+  const [
+    connectionStatus,
+    setConnectionStatus,
+  ] = useState(
     "Disconnected"
   );
 
-  const socketRef = useRef(null);
 
+  // -------------------------------------------------------
+  // MUSIC
+  // -------------------------------------------------------
+
+  const [
+    selectedFile,
+    setSelectedFile,
+  ] = useState(null);
+
+  const [
+    uploadMessage,
+    setUploadMessage,
+  ] = useState("");
+
+  const [
+    isUploading,
+    setIsUploading,
+  ] = useState(false);
+
+  const [
+    queue,
+    setQueue,
+  ] = useState([]);
+
+
+  // -------------------------------------------------------
+  // REFS
+  // -------------------------------------------------------
+
+  const socketRef =
+    useRef(null);
+
+  const fileInputRef =
+    useRef(null);
+
+
+  // -------------------------------------------------------
+  // CHECK BACKEND
+  // -------------------------------------------------------
 
   useEffect(() => {
+
     fetch(
-      "http://127.0.0.1:8000/api/status"
+      `${API_BASE_URL}/api/status`
     )
       .then((response) => {
+
         if (!response.ok) {
+
           throw new Error(
             "Backend status request failed"
           );
+
         }
 
         return response.json();
+
       })
       .then((data) => {
+
         setBackendMessage(
           data.message
         );
+
       })
       .catch((error) => {
+
         console.error(
           "Backend connection error:",
           error
@@ -59,43 +174,76 @@ function App() {
         setBackendMessage(
           "Failed to connect to backend"
         );
+
       });
+
   }, []);
 
+
+  // -------------------------------------------------------
+  // CLEANUP WEBSOCKET
+  // -------------------------------------------------------
 
   useEffect(() => {
+
     return () => {
+
       if (socketRef.current) {
+
         socketRef.current.close();
+
       }
+
     };
+
   }, []);
 
+
+  // -------------------------------------------------------
+  // CONNECT TO ROOM
+  // -------------------------------------------------------
 
   const connectToRoom = (
     code,
     name
   ) => {
+
     if (socketRef.current) {
+
       socketRef.current.close();
+
       socketRef.current = null;
+
     }
 
+
     setMembers([]);
+
+    setQueue([]);
+
     setConnectionStatus(
       "Connecting..."
     );
 
-    const socket = new WebSocket(
-      `ws://127.0.0.1:8000/ws/rooms/${code}?name=${encodeURIComponent(
-        name
-      )}`
-    );
 
-    socketRef.current = socket;
+    const socket =
+      new WebSocket(
+        `${WS_BASE_URL}/ws/rooms/${code}?name=${encodeURIComponent(
+          name
+        )}`
+      );
 
+
+    socketRef.current =
+      socket;
+
+
+    // -----------------------------------------------------
+    // OPEN
+    // -----------------------------------------------------
 
     socket.onopen = () => {
+
       console.log(
         "WebSocket connected"
       );
@@ -107,17 +255,25 @@ function App() {
       setConnectionStatus(
         "Connected"
       );
+
     };
 
+
+    // -----------------------------------------------------
+    // MESSAGE
+    // -----------------------------------------------------
 
     socket.onmessage = (
       event
     ) => {
+
       try {
+
         const data =
           JSON.parse(
             event.data
           );
+
 
         console.log(
           "WebSocket message:",
@@ -125,10 +281,15 @@ function App() {
         );
 
 
+        // -----------------------------------------------
+        // CONNECTED
+        // -----------------------------------------------
+
         if (
           data.type ===
           "connected"
         ) {
+
           setCurrentRoom(
             data.room_code
           );
@@ -136,23 +297,67 @@ function App() {
           setConnectionStatus(
             "Connected"
           );
+
         }
 
+
+        // -----------------------------------------------
+        // ROOM STATE
+        // -----------------------------------------------
+
+        if (
+          data.type ===
+          "room_state"
+        ) {
+
+          setQueue(
+            data.room.queue || []
+          );
+
+        }
+
+
+        // -----------------------------------------------
+        // MEMBERS
+        // -----------------------------------------------
 
         if (
           data.type ===
           "members_updated"
         ) {
+
           setMembers(
             data.members
           );
+
         }
 
+
+        // -----------------------------------------------
+        // QUEUE
+        // -----------------------------------------------
+
+        if (
+          data.type ===
+          "queue_updated"
+        ) {
+
+          setQueue(
+            data.queue
+          );
+
+        }
+
+
+        // -----------------------------------------------
+        // ERROR
+        // -----------------------------------------------
 
         if (
           data.type ===
           "error"
         ) {
+
           setJoinMessage(
             data.message
           );
@@ -160,20 +365,29 @@ function App() {
           setConnectionStatus(
             "Disconnected"
           );
+
         }
 
       } catch (error) {
+
         console.error(
           "Failed to read WebSocket message:",
           error
         );
+
       }
+
     };
 
+
+    // -----------------------------------------------------
+    // ERROR
+    // -----------------------------------------------------
 
     socket.onerror = (
       error
     ) => {
+
       console.error(
         "WebSocket error:",
         error
@@ -182,12 +396,18 @@ function App() {
       setConnectionStatus(
         "Connection Error"
       );
+
     };
 
+
+    // -----------------------------------------------------
+    // CLOSE
+    // -----------------------------------------------------
 
     socket.onclose = (
       event
     ) => {
+
       console.log(
         "WebSocket disconnected",
         event.code,
@@ -197,191 +417,448 @@ function App() {
       setConnectionStatus(
         "Disconnected"
       );
+
     };
+
   };
 
 
-  const createRoom = async () => {
-    const name =
-      displayName.trim();
+  // -------------------------------------------------------
+  // CREATE ROOM
+  // -------------------------------------------------------
 
-    if (!name) {
-      setRoomMessage(
-        "Please enter your name first"
-      );
+  const createRoom =
+    async () => {
 
-      return;
-    }
-
-    try {
-      setIsCreatingRoom(
-        true
-      );
-
-      setRoomMessage("");
-      setRoomCode("");
+      const name =
+        displayName.trim();
 
 
-      const response =
-        await fetch(
-          "http://127.0.0.1:8000/api/rooms/create",
-          {
-            method: "POST",
-          }
+      if (!name) {
+
+        setRoomMessage(
+          "Please enter your name first"
+        );
+
+        return;
+
+      }
+
+
+      try {
+
+        setIsCreatingRoom(
+          true
+        );
+
+        setRoomMessage("");
+
+        setRoomCode("");
+
+
+        const response =
+          await fetch(
+            `${API_BASE_URL}/api/rooms/create`,
+            {
+              method: "POST",
+            }
+          );
+
+
+        const data =
+          await response.json();
+
+
+        if (!response.ok) {
+
+          throw new Error(
+            data.detail ||
+              "Failed to create room"
+          );
+
+        }
+
+
+        const code =
+          data.room.code;
+
+
+        setRoomCode(
+          code
+        );
+
+        setRoomMessage(
+          "Room created successfully"
         );
 
 
-      const data =
-        await response.json();
-
-
-      if (!response.ok) {
-        throw new Error(
-          data.detail ||
-            "Failed to create room"
+        connectToRoom(
+          code,
+          name
         );
+
+      } catch (error) {
+
+        console.error(
+          "Create room error:",
+          error
+        );
+
+        setRoomMessage(
+          "Failed to create room"
+        );
+
+      } finally {
+
+        setIsCreatingRoom(
+          false
+        );
+
+      }
+
+    };
+
+
+  // -------------------------------------------------------
+  // JOIN ROOM
+  // -------------------------------------------------------
+
+  const joinRoom =
+    async () => {
+
+      const name =
+        displayName.trim();
+
+
+      if (!name) {
+
+        setJoinMessage(
+          "Please enter your name first"
+        );
+
+        return;
+
       }
 
 
       const code =
-        data.room.code;
+        joinCode
+          .trim()
+          .toUpperCase();
 
 
-      setRoomCode(
-        code
-      );
+      if (!code) {
 
-      setRoomMessage(
-        "Room created successfully"
-      );
-
-
-      connectToRoom(
-        code,
-        name
-      );
-
-    } catch (error) {
-      console.error(
-        "Create room error:",
-        error
-      );
-
-      setRoomMessage(
-        "Failed to create room"
-      );
-
-    } finally {
-      setIsCreatingRoom(
-        false
-      );
-    }
-  };
-
-
-  const joinRoom = async () => {
-    const name =
-      displayName.trim();
-
-    if (!name) {
-      setJoinMessage(
-        "Please enter your name first"
-      );
-
-      return;
-    }
-
-
-    const code =
-      joinCode
-        .trim()
-        .toUpperCase();
-
-
-    if (!code) {
-      setJoinMessage(
-        "Please enter a room code"
-      );
-
-      return;
-    }
-
-
-    try {
-      setIsJoiningRoom(
-        true
-      );
-
-      setJoinMessage("");
-
-
-      const response =
-        await fetch(
-          `http://127.0.0.1:8000/api/rooms/${code}`
+        setJoinMessage(
+          "Please enter a room code"
         );
 
+        return;
 
-      const data =
-        await response.json();
-
-
-      if (!response.ok) {
-        throw new Error(
-          data.detail ||
-            "Room not found"
-        );
       }
 
 
-      setJoinMessage(
-        `Joining room ${code}...`
-      );
+      try {
+
+        setIsJoiningRoom(
+          true
+        );
+
+        setJoinMessage("");
 
 
-      connectToRoom(
-        code,
-        name
+        const response =
+          await fetch(
+            `${API_BASE_URL}/api/rooms/${code}`
+          );
+
+
+        const data =
+          await response.json();
+
+
+        if (!response.ok) {
+
+          throw new Error(
+            data.detail ||
+              "Room not found"
+          );
+
+        }
+
+
+        setJoinMessage(
+          `Joining room ${code}...`
+        );
+
+
+        connectToRoom(
+          code,
+          name
+        );
+
+      } catch (error) {
+
+        console.error(
+          "Join room error:",
+          error
+        );
+
+        setJoinMessage(
+          "Room not found"
+        );
+
+      } finally {
+
+        setIsJoiningRoom(
+          false
+        );
+
+      }
+
+    };
+
+
+  // -------------------------------------------------------
+  // SELECT AUDIO FILE
+  // -------------------------------------------------------
+
+  const handleFileChange = (
+    event
+  ) => {
+
+    const file =
+      event.target.files[0];
+
+
+    setUploadMessage("");
+
+
+    if (!file) {
+
+      setSelectedFile(
+        null
       );
 
-    } catch (error) {
-      console.error(
-        "Join room error:",
-        error
-      );
+      return;
 
-      setJoinMessage(
-        "Room not found"
-      );
-
-    } finally {
-      setIsJoiningRoom(
-        false
-      );
     }
+
+
+    const maxSize =
+      25 * 1024 * 1024;
+
+
+    if (
+      file.size > maxSize
+    ) {
+
+      setSelectedFile(
+        null
+      );
+
+      setUploadMessage(
+        "File is too large. Maximum size is 25 MB."
+      );
+
+
+      event.target.value = "";
+
+      return;
+
+    }
+
+
+    setSelectedFile(
+      file
+    );
+
   };
 
 
+  // -------------------------------------------------------
+  // UPLOAD AUDIO
+  // -------------------------------------------------------
+
+  const uploadSong =
+    async () => {
+
+      if (!selectedFile) {
+
+        setUploadMessage(
+          "Please select an audio file"
+        );
+
+        return;
+
+      }
+
+
+      if (!currentRoom) {
+
+        setUploadMessage(
+          "You are not connected to a room"
+        );
+
+        return;
+
+      }
+
+
+      try {
+
+        setIsUploading(
+          true
+        );
+
+        setUploadMessage(
+          "Uploading..."
+        );
+
+
+        const formData =
+          new FormData();
+
+
+        formData.append(
+          "file",
+          selectedFile
+        );
+
+
+        formData.append(
+          "uploader_name",
+          displayName
+        );
+
+
+        const response =
+          await fetch(
+            `${API_BASE_URL}/api/rooms/${currentRoom}/songs`,
+            {
+              method: "POST",
+              body: formData,
+            }
+          );
+
+
+        const data =
+          await response.json();
+
+
+        if (!response.ok) {
+
+          throw new Error(
+            data.detail ||
+              "Failed to upload song"
+          );
+
+        }
+
+
+        setUploadMessage(
+          "Song uploaded successfully"
+        );
+
+
+        setSelectedFile(
+          null
+        );
+
+
+        if (
+          fileInputRef.current
+        ) {
+
+          fileInputRef.current.value =
+            "";
+
+        }
+
+      } catch (error) {
+
+        console.error(
+          "Upload error:",
+          error
+        );
+
+        setUploadMessage(
+          error.message ||
+            "Failed to upload song"
+        );
+
+      } finally {
+
+        setIsUploading(
+          false
+        );
+
+      }
+
+    };
+
+
+  // -------------------------------------------------------
+  // LEAVE ROOM
+  // -------------------------------------------------------
+
   const leaveRoom = () => {
+
     if (socketRef.current) {
+
       socketRef.current.close();
-      socketRef.current = null;
+
+      socketRef.current =
+        null;
+
     }
 
+
     setCurrentRoom("");
+
     setMembers([]);
+
+    setQueue([]);
+
     setConnectionStatus(
       "Disconnected"
     );
 
     setJoinCode("");
+
     setJoinMessage("");
+
     setRoomCode("");
+
     setRoomMessage("");
+
+    setSelectedFile(
+      null
+    );
+
+    setUploadMessage("");
+
+
+    if (
+      fileInputRef.current
+    ) {
+
+      fileInputRef.current.value =
+        "";
+
+    }
+
   };
 
 
+  // -------------------------------------------------------
+  // ACTIVE ROOM SCREEN
+  // -------------------------------------------------------
+
   if (currentRoom) {
+
     return (
+
       <main className="app">
 
         <section className="hero">
@@ -454,7 +931,7 @@ function App() {
 
             {members.length === 0 ? (
 
-              <p className="empty-members">
+              <p className="empty-message">
                 Waiting for members...
               </p>
 
@@ -495,16 +972,178 @@ function App() {
           </section>
 
 
-          <section className="coming-next">
+          <section className="upload-section">
 
             <h3>
-              Music Player
+              Add Music
             </h3>
 
             <p>
-              Temporary music upload
-              and synchronized playback
-              will be added next.
+              Upload music temporarily
+              to this room.
+            </p>
+
+
+            <div className="upload-controls">
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".mp3,.wav,.ogg,.m4a,audio/*"
+                onChange={
+                  handleFileChange
+                }
+              />
+
+
+              <button
+                className="primary-button"
+                onClick={
+                  uploadSong
+                }
+                disabled={
+                  isUploading
+                }
+              >
+
+                {isUploading
+                  ? "Uploading..."
+                  : "Upload Song"}
+
+              </button>
+
+            </div>
+
+
+            {selectedFile && (
+
+              <p className="selected-file">
+
+                Selected:
+
+                <strong>
+                  {" "}
+                  {selectedFile.name}
+                </strong>
+
+              </p>
+
+            )}
+
+
+            {uploadMessage && (
+
+              <p className="upload-message">
+
+                {uploadMessage}
+
+              </p>
+
+            )}
+
+          </section>
+
+
+          <section className="queue-section">
+
+            <div className="queue-heading">
+
+              <h3>
+                Shared Queue
+              </h3>
+
+              <span>
+                {queue.length}
+              </span>
+
+            </div>
+
+
+            {queue.length === 0 ? (
+
+              <p className="empty-message">
+
+                No songs have been
+                added yet.
+
+              </p>
+
+            ) : (
+
+              <div className="queue-list">
+
+                {queue.map(
+                  (
+                    song,
+                    index
+                  ) => (
+
+                    <div
+                      className="queue-item"
+                      key={song.id}
+                    >
+
+                      <div className="queue-number">
+
+                        {index + 1}
+
+                      </div>
+
+
+                      <div className="song-information">
+
+                        <strong>
+                          {song.title}
+                        </strong>
+
+                        <span>
+
+                          Uploaded by{" "}
+
+                          {song.uploaded_by}
+
+                        </span>
+
+                        <small>
+
+                          {(
+                            song.size_bytes
+                            /
+                            1024
+                            /
+                            1024
+                          ).toFixed(2)}{" "}
+
+                          MB
+
+                        </small>
+
+                      </div>
+
+                    </div>
+
+                  )
+                )}
+
+              </div>
+
+            )}
+
+          </section>
+
+
+          <section className="coming-next">
+
+            <h3>
+              Synchronized Player
+            </h3>
+
+            <p>
+              The shared queue is now
+              real-time. Play, pause,
+              seek and synchronized
+              playback will be added
+              in the next stage.
             </p>
 
           </section>
@@ -512,11 +1151,18 @@ function App() {
         </section>
 
       </main>
+
     );
+
   }
 
 
+  // -------------------------------------------------------
+  // HOME SCREEN
+  // -------------------------------------------------------
+
   return (
+
     <main className="app">
 
       <section className="hero">
@@ -536,11 +1182,14 @@ function App() {
       <section className="status-section">
 
         <p>
+
           Backend Status:
 
           <span className="backend-status">
+
             {" "}
             {backendMessage}
+
           </span>
 
         </p>
@@ -591,43 +1240,28 @@ function App() {
 
         <button
           className="primary-button"
-          onClick={createRoom}
-          disabled={isCreatingRoom}
+          onClick={
+            createRoom
+          }
+          disabled={
+            isCreatingRoom
+          }
         >
+
           {isCreatingRoom
             ? "Creating..."
             : "Create Room"}
+
         </button>
 
 
         {roomMessage && (
 
           <p className="room-message">
+
             {roomMessage}
+
           </p>
-
-        )}
-
-
-        {roomCode && (
-
-          <div className="room-result">
-
-            <p>
-              Your Room Code
-            </p>
-
-            <strong>
-              {roomCode}
-            </strong>
-
-            <small>
-              Share this code with
-              people you want to
-              listen with.
-            </small>
-
-          </div>
 
         )}
 
@@ -663,12 +1297,18 @@ function App() {
 
           <button
             className="primary-button"
-            onClick={joinRoom}
-            disabled={isJoiningRoom}
+            onClick={
+              joinRoom
+            }
+            disabled={
+              isJoiningRoom
+            }
           >
+
             {isJoiningRoom
               ? "Joining..."
               : "Join Room"}
+
           </button>
 
         </div>
@@ -677,7 +1317,9 @@ function App() {
         {joinMessage && (
 
           <p className="join-message">
+
             {joinMessage}
+
           </p>
 
         )}
@@ -685,7 +1327,9 @@ function App() {
       </section>
 
     </main>
+
   );
+
 }
 
 

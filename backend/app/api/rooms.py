@@ -1,7 +1,10 @@
 import random
 import string
 
-from fastapi import APIRouter, HTTPException
+from fastapi import (
+    APIRouter,
+    HTTPException,
+)
 
 
 router = APIRouter(
@@ -10,13 +13,27 @@ router = APIRouter(
 )
 
 
+# ---------------------------------------------------------
+# TEMPORARY ACTIVE ROOMS
+# ---------------------------------------------------------
+
 rooms = {}
 
 
-def generate_room_code(length: int = 6):
-    characters = string.ascii_uppercase + string.digits
+# ---------------------------------------------------------
+# GENERATE UNIQUE ROOM CODE
+# ---------------------------------------------------------
+
+def generate_room_code(
+    length: int = 6,
+):
+    characters = (
+        string.ascii_uppercase
+        + string.digits
+    )
 
     while True:
+
         code = "".join(
             random.choices(
                 characters,
@@ -25,14 +42,25 @@ def generate_room_code(length: int = 6):
         )
 
         if code not in rooms:
+
             return code
 
 
+# ---------------------------------------------------------
+# CREATE ROOM
+# ---------------------------------------------------------
+
 @router.post("/create")
 def create_room():
-    room_code = generate_room_code()
 
-    rooms[room_code] = {
+    room_code = (
+        generate_room_code()
+    )
+
+
+    rooms[
+        room_code
+    ] = {
         "code": room_code,
         "members": [],
         "queue": [],
@@ -40,24 +68,42 @@ def create_room():
         "is_playing": False,
     }
 
+
     return {
         "status": "success",
         "message": "Room created successfully",
-        "room": rooms[room_code],
+        "room": rooms[
+            room_code
+        ],
     }
 
 
+# ---------------------------------------------------------
+# GET ROOM
+# ---------------------------------------------------------
+
 @router.get("/{room_code}")
-def get_room(room_code: str):
-    room_code = room_code.strip().upper()
+def get_room(
+    room_code: str,
+):
+    room_code = (
+        room_code
+        .strip()
+        .upper()
+    )
+
 
     if room_code not in rooms:
+
         raise HTTPException(
             status_code=404,
             detail="Room not found",
         )
 
+
     return {
         "status": "success",
-        "room": rooms[room_code],
+        "room": rooms[
+            room_code
+        ],
     }
