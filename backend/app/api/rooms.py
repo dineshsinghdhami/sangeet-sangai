@@ -3,10 +3,12 @@ import string
 
 from fastapi import APIRouter, HTTPException
 
+
 router = APIRouter(
     prefix="/api/rooms",
-    tags=["Rooms"]
+    tags=["Rooms"],
 )
+
 
 rooms = {}
 
@@ -16,7 +18,10 @@ def generate_room_code(length: int = 6):
 
     while True:
         code = "".join(
-            random.choices(characters, k=length)
+            random.choices(
+                characters,
+                k=length,
+            )
         )
 
         if code not in rooms:
@@ -44,12 +49,12 @@ def create_room():
 
 @router.get("/{room_code}")
 def get_room(room_code: str):
-    room_code = room_code.upper()
+    room_code = room_code.strip().upper()
 
     if room_code not in rooms:
         raise HTTPException(
             status_code=404,
-            detail="Room not found"
+            detail="Room not found",
         )
 
     return {

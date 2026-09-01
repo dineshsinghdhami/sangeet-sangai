@@ -8,6 +8,7 @@
 
 body {
   margin: 0;
+
   font-family:
     Inter,
     system-ui,
@@ -15,6 +16,7 @@ body {
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
+
   background: #f7f7f7;
   color: #181818;
 }
@@ -25,33 +27,54 @@ input {
 }
 
 .app {
-  width: min(900px, calc(100% - 32px));
+  width: min(
+    900px,
+    calc(100% - 32px)
+  );
+
   margin: 0 auto;
-  padding: 80px 0;
+
+  padding: 60px 0;
 }
+
+
+/* HERO */
 
 .hero {
   text-align: center;
-  margin-bottom: 40px;
+
+  margin-bottom: 36px;
 }
 
 .hero h1 {
   margin: 0;
+
   font-size: 3rem;
+  font-weight: 700;
 }
 
 .subtitle {
-  margin-top: 12px;
+  margin-top: 10px;
+
   color: #666;
+
   font-size: 1.1rem;
 }
 
+
+/* STATUS */
+
 .status-section {
-  margin-bottom: 30px;
-  padding: 14px 18px;
+  margin-bottom: 24px;
+
+  padding: 16px 18px;
+
   background: white;
+
   border: 1px solid #dddddd;
   border-radius: 10px;
+
+  text-align: center;
 }
 
 .status-section p {
@@ -62,11 +85,64 @@ input {
   font-weight: 600;
 }
 
-.room-section {
-  padding: 32px;
+
+/* NAME */
+
+.identity-section {
+  margin-bottom: 24px;
+
+  padding: 28px;
+
   background: white;
+
   border: 1px solid #dddddd;
   border-radius: 14px;
+
+  text-align: center;
+}
+
+.identity-section h2 {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.identity-section p {
+  color: #666666;
+}
+
+.name-input {
+  width: min(
+    100%,
+    320px
+  );
+
+  min-height: 46px;
+
+  margin-top: 12px;
+
+  padding: 12px 14px;
+
+  border: 1px solid #cccccc;
+  border-radius: 8px;
+
+  outline: none;
+}
+
+.name-input:focus {
+  border-color: #181818;
+}
+
+
+/* CREATE ROOM */
+
+.room-section {
+  padding: 32px;
+
+  background: white;
+
+  border: 1px solid #dddddd;
+  border-radius: 14px;
+
   text-align: center;
 }
 
@@ -76,71 +152,378 @@ input {
 }
 
 .room-section > p {
-  color: #666;
   margin-bottom: 24px;
+
+  color: #666666;
 }
 
-.create-room-button {
-  min-width: 150px;
-  padding: 12px 20px;
+
+/* BUTTON */
+
+.primary-button {
+  min-height: 46px;
+
+  padding: 12px 22px;
+
   border: 0;
   border-radius: 8px;
+
   background: #181818;
   color: white;
+
   cursor: pointer;
 }
 
-.create-room-button:disabled {
+.primary-button:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.primary-button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.primary-button:disabled {
   opacity: 0.6;
+
   cursor: not-allowed;
 }
 
+
+/* ROOM RESULT */
+
 .room-message {
   margin-top: 20px;
+
   font-weight: 600;
 }
 
 .room-result {
-  max-width: 360px;
+  max-width: 380px;
+
   margin: 24px auto 0;
+
   padding: 24px;
+
   border: 1px solid #dddddd;
   border-radius: 12px;
 }
 
 .room-result p {
   margin: 0 0 10px;
-  color: #666;
+
+  color: #666666;
 }
 
 .room-result strong {
   display: block;
-  font-size: 2rem;
-  letter-spacing: 6px;
+
   margin-bottom: 12px;
+
+  font-size: 2rem;
+
+  letter-spacing: 6px;
 }
 
 .room-result small {
   display: block;
-  color: #777;
+
+  color: #777777;
+
   line-height: 1.5;
 }
 
+
+/* JOIN ROOM */
+
+.join-section {
+  margin-top: 24px;
+
+  padding: 32px;
+
+  background: white;
+
+  border: 1px solid #dddddd;
+  border-radius: 14px;
+
+  text-align: center;
+}
+
+.join-section h2 {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+.join-section > p {
+  color: #666666;
+}
+
+.join-form {
+  display: flex;
+
+  justify-content: center;
+
+  gap: 10px;
+
+  margin-top: 24px;
+}
+
+.join-form input {
+  width: 230px;
+
+  min-height: 46px;
+
+  padding: 12px 14px;
+
+  border: 1px solid #cccccc;
+  border-radius: 8px;
+
+  outline: none;
+
+  text-align: center;
+  text-transform: uppercase;
+
+  letter-spacing: 3px;
+  font-weight: 600;
+}
+
+.join-form input:focus {
+  border-color: #181818;
+}
+
+.join-form input::placeholder {
+  letter-spacing: normal;
+
+  font-weight: 400;
+}
+
+.join-message {
+  margin-top: 20px;
+
+  font-weight: 600;
+}
+
+
+/* ACTIVE ROOM */
+
+.active-room {
+  padding: 30px;
+
+  background: white;
+
+  border: 1px solid #dddddd;
+  border-radius: 14px;
+}
+
+.room-header {
+  display: flex;
+
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 20px;
+
+  padding-bottom: 22px;
+
+  border-bottom: 1px solid #eeeeee;
+}
+
+.room-label {
+  margin: 0 0 5px;
+
+  color: #777777;
+
+  font-size: 0.9rem;
+}
+
+.room-header h2 {
+  margin: 0;
+
+  font-size: 2rem;
+
+  letter-spacing: 4px;
+}
+
+.leave-button {
+  min-height: 44px;
+
+  padding: 10px 18px;
+
+  background: white;
+  color: #181818;
+
+  border: 1px solid #bbbbbb;
+  border-radius: 8px;
+
+  cursor: pointer;
+}
+
+.leave-button:hover {
+  background: #f4f4f4;
+}
+
+
+/* CONNECTION */
+
+.connection-info {
+  margin-top: 20px;
+
+  padding: 12px 14px;
+
+  background: #f7f7f7;
+
+  border-radius: 8px;
+
+  font-size: 0.95rem;
+}
+
+
+/* MEMBERS */
+
+.members-section {
+  margin-top: 28px;
+}
+
+.members-heading {
+  display: flex;
+
+  align-items: center;
+  justify-content: space-between;
+
+  margin-bottom: 16px;
+}
+
+.members-heading h3 {
+  margin: 0;
+}
+
+.members-heading span {
+  min-width: 32px;
+
+  padding: 5px 10px;
+
+  border-radius: 20px;
+
+  background: #eeeeee;
+
+  text-align: center;
+
+  font-weight: 600;
+}
+
+.members-list {
+  display: grid;
+
+  grid-template-columns:
+    repeat(
+      auto-fit,
+      minmax(180px, 1fr)
+    );
+
+  gap: 12px;
+}
+
+.member {
+  display: flex;
+
+  align-items: center;
+
+  gap: 12px;
+
+  padding: 14px;
+
+  border: 1px solid #dddddd;
+  border-radius: 10px;
+}
+
+.member-avatar {
+  display: flex;
+
+  width: 40px;
+  height: 40px;
+
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 50%;
+
+  background: #181818;
+  color: white;
+
+  font-weight: 700;
+}
+
+.empty-members {
+  color: #777777;
+}
+
+
+/* COMING NEXT */
+
+.coming-next {
+  margin-top: 30px;
+
+  padding: 24px;
+
+  background: #f7f7f7;
+
+  border-radius: 10px;
+
+  text-align: center;
+}
+
+.coming-next h3 {
+  margin-top: 0;
+}
+
+.coming-next p {
+  margin-bottom: 0;
+
+  color: #666666;
+
+  line-height: 1.6;
+}
+
+
+/* MOBILE */
+
 @media (max-width: 600px) {
   .app {
-    padding: 45px 0;
+    padding: 35px 0;
   }
 
   .hero h1 {
     font-size: 2.3rem;
   }
 
-  .room-section {
-    padding: 24px 18px;
+  .room-section,
+  .join-section,
+  .identity-section,
+  .active-room {
+    padding: 22px 18px;
+  }
+
+  .join-form {
+    flex-direction: column;
+  }
+
+  .join-form input,
+  .join-form button {
+    width: 100%;
+  }
+
+  .room-header {
+    align-items: flex-start;
+
+    flex-direction: column;
+  }
+
+  .leave-button {
+    width: 100%;
   }
 
   .room-result strong {
     font-size: 1.6rem;
+
     letter-spacing: 4px;
   }
 }
