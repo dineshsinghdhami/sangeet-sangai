@@ -1,6 +1,7 @@
 import json
 import time
 import uuid
+from pathlib import Path
 
 from fastapi import (
     APIRouter,
@@ -24,20 +25,24 @@ router = APIRouter(
 )
 
 
-# =========================================================
-# SYNCHRONIZATION SETTINGS
-# =========================================================
-
 PLAY_START_DELAY = 0.7
-
 CONTROL_DELAY = 0.2
 
 
-# =========================================================
-# ACTIVE CONNECTIONS
-# =========================================================
-
 connections = {}
+
+
+BACKEND_DIRECTORY = (
+    Path(__file__)
+    .resolve()
+    .parents[2]
+)
+
+TEMP_ROOMS_DIRECTORY = (
+    BACKEND_DIRECTORY
+    / "temp"
+    / "rooms"
+)
 
 
 # =========================================================
@@ -78,7 +83,7 @@ async def broadcast_room_event(
 
 
 # =========================================================
-# SET HOST
+# HOST
 # =========================================================
 
 def set_room_host(
@@ -115,28 +120,43 @@ def set_room_host(
         "name"
     ]
 
-    print(
-        f"Room {room_code} host: "
-        f"{member_connection['name']}"
+
+def member_is_host(
+    room_code: str,
+    member_connection: dict,
+):
+    if room_code not in rooms:
+        return False
+
+    return (
+        member_connection[
+            "id"
+        ]
+        ==
+        rooms[
+            room_code
+        ].get(
+            "host_member_id"
+        )
     )
 
 
 # =========================================================
-# BROADCAST MEMBERS
+# MEMBERS
 # =========================================================
 
 async def broadcast_members(
     room_code: str,
 ):
+    if room_code not in rooms:
+        return
+
     room_connections = (
         connections.get(
             room_code,
             [],
         )
     )
-
-    if room_code not in rooms:
-        return
 
     room = rooms[
         room_code
@@ -149,8 +169,11 @@ async def broadcast_members(
     members = []
 
     for connection in room_connections:
+
         is_host = (
-            connection["id"]
+            connection[
+                "id"
+            ]
             ==
             host_member_id
         )
@@ -158,19 +181,25 @@ async def broadcast_members(
         display_name = (
             f"{connection['name']} (Host)"
             if is_host
-            else connection["name"]
+            else connection[
+                "name"
+            ]
         )
 
         members.append(
             {
                 "id":
-                    connection["id"],
+                    connection[
+                        "id"
+                    ],
 
                 "name":
                     display_name,
 
                 "raw_name":
-                    connection["name"],
+                    connection[
+                        "name"
+                    ],
 
                 "is_host":
                     is_host,
@@ -199,12 +228,140 @@ async def broadcast_members(
                 room.get(
                     "host_name"
                 ),
+
+            "max_members":
+                room.get(
+                    "max_members",
+                    8,
+                ),
         },
     )
 
 
 # =========================================================
-# FIND SONG
+# ROOM SETTINGS
+# =========================================================
+
+async def broadcast_room_settings(
+    room_code: str,
+):
+    if room_code not in rooms:
+        return
+
+    room = rooms[
+        room_code
+    ]
+
+    await broadcast_room_event(
+        room_code,
+        {
+            "type":
+                "room_settings",
+
+            "playback_control_mode":
+                room.get(
+                    "playback_control_mode",
+                    "everyone",
+                ),
+
+            "host_member_id":
+                room.get(
+                    "host_member_id"
+                ),
+
+            "host_name":
+                room.get(
+                    "host_name"
+                ),
+
+            "max_members":
+                room.get(
+                    "max_members",
+                    8,
+                ),
+
+            "is_locked":
+                bool(
+                    room.get(
+                        "is_locked",
+                        False,
+                    )
+                ),
+        },
+    )
+
+
+# =========================================================
+# QUEUE BROADCAST
+# =========================================================
+
+async def broadcast_queue(
+    room_code: str,
+):
+    if room_code not in rooms:
+        return
+
+    await broadcast_room_event(
+        room_code,
+        {
+            "type":
+                "queue_updated",
+
+            "queue":
+                rooms[
+                    room_code
+                ][
+                    "queue"
+                ],
+        },
+    )
+
+
+# =========================================================
+# PLAYBACK PERMISSION
+# =========================================================
+
+def member_can_control_playback(
+    room_code: str,
+    member_connection: dict,
+):
+    if room_code not in rooms:
+        return False
+
+    room = rooms[
+        room_code
+    ]
+
+    mode = room.get(
+        "playback_control_mode",
+        "everyone",
+    )
+
+    if mode == "everyone":
+        return True
+
+    return member_is_host(
+        room_code,
+        member_connection,
+    )
+
+
+async def send_permission_error(
+    websocket: WebSocket,
+):
+    await websocket.send_json(
+        {
+            "type":
+                "permission_error",
+
+            "message":
+                "Only the host can control playback in Host Only mode.",
+        }
+    )
+
+
+# =========================================================
+# SONG HELPERS
 # =========================================================
 
 def find_song(
@@ -221,6 +378,7 @@ def find_song(
     for song in room[
         "queue"
     ]:
+
         if song[
             "id"
         ] == song_id:
@@ -228,10 +386,6 @@ def find_song(
 
     return None
 
-
-# =========================================================
-# GET SONG INDEX
-# =========================================================
 
 def get_song_index(
     room_code: str,
@@ -245,8 +399,11 @@ def get_song_index(
         return -1
 
     for index, song in enumerate(
-        room["queue"]
+        room[
+            "queue"
+        ]
     ):
+
         if song[
             "id"
         ] == song_id:
@@ -256,7 +413,63 @@ def get_song_index(
 
 
 # =========================================================
-# BROADCAST PLAYBACK STATE
+# DELETE SONG FILE
+# =========================================================
+
+def delete_song_file(
+    room_code: str,
+    song: dict,
+):
+    song_url = str(
+        song.get(
+            "url",
+            "",
+        )
+    ).strip()
+
+    if not song_url:
+        return
+
+    filename = Path(
+        song_url
+    ).name
+
+    if not filename:
+        return
+
+    room_directory = (
+        TEMP_ROOMS_DIRECTORY
+        /
+        room_code
+    ).resolve()
+
+    file_path = (
+        room_directory
+        /
+        filename
+    ).resolve()
+
+    if (
+        file_path.parent
+        !=
+        room_directory
+    ):
+        return
+
+    try:
+        file_path.unlink(
+            missing_ok=True
+        )
+
+    except Exception as error:
+        print(
+            "Failed to delete song file:",
+            error,
+        )
+
+
+# =========================================================
+# PLAYBACK STATE
 # =========================================================
 
 async def broadcast_playback_state(
@@ -599,7 +812,8 @@ async def handle_next(
             current_index == -1
             or
             current_index
-            >= len(queue) - 1
+            >=
+            len(queue) - 1
         ):
             next_song = queue[0]
 
@@ -627,6 +841,7 @@ async def handle_next(
     ] = was_playing
 
     if was_playing:
+
         start_at = (
             time.time()
             +
@@ -638,6 +853,7 @@ async def handle_next(
         ] = start_at
 
     else:
+
         start_at = None
 
         room[
@@ -681,6 +897,7 @@ async def handle_previous(
         previous_song = queue[0]
 
     else:
+
         current_index = (
             get_song_index(
                 room_code,
@@ -689,9 +906,7 @@ async def handle_previous(
         )
 
         if current_index <= 0:
-            previous_song = queue[
-                len(queue) - 1
-            ]
+            previous_song = queue[-1]
 
         else:
             previous_song = queue[
@@ -717,6 +932,7 @@ async def handle_previous(
     ] = was_playing
 
     if was_playing:
+
         start_at = (
             time.time()
             +
@@ -728,6 +944,7 @@ async def handle_previous(
         ] = start_at
 
     else:
+
         start_at = None
 
         room[
@@ -824,12 +1041,351 @@ async def handle_state_request(
 
 
 # =========================================================
+# PLAYBACK MODE
+# =========================================================
+
+async def handle_playback_mode_change(
+    websocket: WebSocket,
+    room_code: str,
+    member_connection: dict,
+    data: dict,
+):
+    if not member_is_host(
+        room_code,
+        member_connection,
+    ):
+
+        await websocket.send_json(
+            {
+                "type":
+                    "permission_error",
+
+                "message":
+                    "Only the host can change playback permissions.",
+            }
+        )
+
+        return
+
+    mode = data.get(
+        "mode"
+    )
+
+    if mode not in {
+        "everyone",
+        "host_only",
+    }:
+        return
+
+    rooms[
+        room_code
+    ][
+        "playback_control_mode"
+    ] = mode
+
+    await broadcast_room_settings(
+        room_code
+    )
+
+
+# =========================================================
+# ROOM LOCK
+# =========================================================
+
+async def handle_room_lock_change(
+    websocket: WebSocket,
+    room_code: str,
+    member_connection: dict,
+    data: dict,
+):
+    if not member_is_host(
+        room_code,
+        member_connection,
+    ):
+
+        await websocket.send_json(
+            {
+                "type":
+                    "permission_error",
+
+                "message":
+                    "Only the host can lock or unlock the room.",
+            }
+        )
+
+        return
+
+    locked = data.get(
+        "locked"
+    )
+
+    if not isinstance(
+        locked,
+        bool,
+    ):
+        return
+
+    rooms[
+        room_code
+    ][
+        "is_locked"
+    ] = locked
+
+    await broadcast_room_settings(
+        room_code
+    )
+
+
+# =========================================================
+# REMOVE SONG
+# =========================================================
+
+async def handle_remove_song(
+    websocket: WebSocket,
+    room_code: str,
+    member_connection: dict,
+    data: dict,
+):
+    if not member_is_host(
+        room_code,
+        member_connection,
+    ):
+
+        await websocket.send_json(
+            {
+                "type":
+                    "permission_error",
+
+                "message":
+                    "Only the host can remove songs from the queue.",
+            }
+        )
+
+        return
+
+    room = rooms[
+        room_code
+    ]
+
+    song_id = str(
+        data.get(
+            "song_id",
+            "",
+        )
+    ).strip()
+
+    if not song_id:
+        return
+
+    song_index = (
+        get_song_index(
+            room_code,
+            song_id,
+        )
+    )
+
+    if song_index == -1:
+
+        await websocket.send_json(
+            {
+                "type":
+                    "queue_action_result",
+
+                "message":
+                    "Song not found.",
+            }
+        )
+
+        return
+
+    removed_song = (
+        room[
+            "queue"
+        ].pop(
+            song_index
+        )
+    )
+
+    removed_current_song = (
+        room.get(
+            "current_song"
+        )
+        ==
+        song_id
+    )
+
+    if removed_current_song:
+
+        room[
+            "current_song"
+        ] = None
+
+        room[
+            "current_position"
+        ] = 0.0
+
+        room[
+            "is_playing"
+        ] = False
+
+        room[
+            "playback_started_at"
+        ] = None
+
+        room[
+            "playback_updated_at"
+        ] = time.time()
+
+    delete_song_file(
+        room_code,
+        removed_song,
+    )
+
+    await broadcast_queue(
+        room_code
+    )
+
+    if removed_current_song:
+
+        await broadcast_playback_state(
+            room_code,
+            "song_removed",
+        )
+
+    await websocket.send_json(
+        {
+            "type":
+                "queue_action_result",
+
+            "message":
+                "Song removed from queue.",
+        }
+    )
+
+
+# =========================================================
+# MOVE SONG
+# =========================================================
+
+async def handle_move_song(
+    websocket: WebSocket,
+    room_code: str,
+    member_connection: dict,
+    data: dict,
+):
+    if not member_is_host(
+        room_code,
+        member_connection,
+    ):
+
+        await websocket.send_json(
+            {
+                "type":
+                    "permission_error",
+
+                "message":
+                    "Only the host can reorder the queue.",
+            }
+        )
+
+        return
+
+    room = rooms[
+        room_code
+    ]
+
+    song_id = str(
+        data.get(
+            "song_id",
+            "",
+        )
+    ).strip()
+
+    direction = str(
+        data.get(
+            "direction",
+            "",
+        )
+    ).strip().lower()
+
+    if direction not in {
+        "up",
+        "down",
+    }:
+        return
+
+    current_index = (
+        get_song_index(
+            room_code,
+            song_id,
+        )
+    )
+
+    if current_index == -1:
+        return
+
+    queue = room[
+        "queue"
+    ]
+
+    if direction == "up":
+
+        if current_index == 0:
+            return
+
+        target_index = (
+            current_index - 1
+        )
+
+    else:
+
+        if (
+            current_index
+            >=
+            len(queue) - 1
+        ):
+            return
+
+        target_index = (
+            current_index + 1
+        )
+
+    queue[
+        current_index
+    ], queue[
+        target_index
+    ] = (
+        queue[
+            target_index
+        ],
+        queue[
+            current_index
+        ],
+    )
+
+    await broadcast_queue(
+        room_code
+    )
+
+    await websocket.send_json(
+        {
+            "type":
+                "queue_action_result",
+
+            "message":
+                "Queue order updated.",
+        }
+    )
+
+
+# =========================================================
 # HANDLE MESSAGE
 # =========================================================
 
 async def handle_room_message(
     websocket: WebSocket,
     room_code: str,
+    member_connection: dict,
     message: str,
 ):
     try:
@@ -844,54 +1400,154 @@ async def handle_room_message(
         "type"
     )
 
+
     if message_type == "sync_request":
+
         await handle_sync_request(
             websocket,
             data,
         )
 
-    elif message_type == "state_request":
+        return
+
+
+    if message_type == "state_request":
+
         await handle_state_request(
             websocket,
             room_code,
         )
 
-    elif message_type == "select_song":
+        return
+
+
+    if message_type == "set_playback_mode":
+
+        await handle_playback_mode_change(
+            websocket,
+            room_code,
+            member_connection,
+            data,
+        )
+
+        return
+
+
+    if message_type == "set_room_lock":
+
+        await handle_room_lock_change(
+            websocket,
+            room_code,
+            member_connection,
+            data,
+        )
+
+        return
+
+
+    if message_type == "remove_song":
+
+        await handle_remove_song(
+            websocket,
+            room_code,
+            member_connection,
+            data,
+        )
+
+        return
+
+
+    if message_type == "move_song":
+
+        await handle_move_song(
+            websocket,
+            room_code,
+            member_connection,
+            data,
+        )
+
+        return
+
+
+    playback_commands = {
+        "select_song",
+        "play",
+        "pause",
+        "seek",
+        "next",
+        "previous",
+    }
+
+
+    if (
+        message_type
+        in
+        playback_commands
+    ):
+
+        allowed = (
+            member_can_control_playback(
+                room_code,
+                member_connection,
+            )
+        )
+
+        if not allowed:
+
+            await send_permission_error(
+                websocket
+            )
+
+            return
+
+
+    if message_type == "select_song":
+
         await handle_select_song(
             room_code,
             data,
         )
 
+
     elif message_type == "play":
+
         await handle_play(
             room_code,
             data,
         )
 
+
     elif message_type == "pause":
+
         await handle_pause(
             room_code,
         )
 
+
     elif message_type == "seek":
+
         await handle_seek(
             room_code,
             data,
         )
 
+
     elif message_type == "next":
+
         await handle_next(
             room_code,
         )
 
+
     elif message_type == "previous":
+
         await handle_previous(
             room_code,
         )
 
 
 # =========================================================
-# WEBSOCKET ENDPOINT
+# WEBSOCKET
 # =========================================================
 
 @router.websocket(
@@ -908,17 +1564,15 @@ async def room_websocket(
         .upper()
     )
 
-    name = name.strip()
+    name = (
+        name.strip()
+        or
+        "Guest"
+    )
 
-    if not name:
-        name = "Guest"
-
-
-    # -----------------------------------------------------
-    # ROOM CHECK
-    # -----------------------------------------------------
 
     if room_code not in rooms:
+
         await websocket.accept()
 
         await websocket.send_json(
@@ -938,24 +1592,91 @@ async def room_websocket(
         return
 
 
-    # -----------------------------------------------------
-    # CANCEL CLEANUP
-    # -----------------------------------------------------
+    room = rooms[
+        room_code
+    ]
+
+    room_connections = (
+        connections.get(
+            room_code,
+            [],
+        )
+    )
+
+
+    if room.get(
+        "is_locked",
+        False,
+    ):
+
+        await websocket.accept()
+
+        await websocket.send_json(
+            {
+                "type":
+                    "room_locked",
+
+                "message":
+                    "Room is locked. Ask the host to unlock it.",
+            }
+        )
+
+        await websocket.close(
+            code=1008
+        )
+
+        return
+
+
+    max_members = int(
+        room.get(
+            "max_members",
+            8,
+        )
+    )
+
+    if (
+        len(
+            room_connections
+        )
+        >=
+        max_members
+    ):
+
+        await websocket.accept()
+
+        await websocket.send_json(
+            {
+                "type":
+                    "room_full",
+
+                "message":
+                    (
+                        f"Room is full "
+                        f"({len(room_connections)}/{max_members})"
+                    ),
+            }
+        )
+
+        await websocket.close(
+            code=1008
+        )
+
+        return
+
 
     cancel_room_cleanup(
         room_code
     )
 
 
-    # -----------------------------------------------------
-    # ACCEPT CONNECTION
-    # -----------------------------------------------------
-
     await websocket.accept()
+
 
     member_id = str(
         uuid.uuid4()
     )
+
 
     member_connection = {
         "id":
@@ -968,10 +1689,13 @@ async def room_websocket(
             websocket,
     }
 
+
     if room_code not in connections:
+
         connections[
             room_code
         ] = []
+
 
     connections[
         room_code
@@ -985,22 +1709,15 @@ async def room_websocket(
     ]
 
 
-    # -----------------------------------------------------
-    # FIRST MEMBER BECOMES HOST
-    # -----------------------------------------------------
-
     if not room.get(
         "host_member_id"
     ):
+
         set_room_host(
             room_code,
             member_connection,
         )
 
-
-    # -----------------------------------------------------
-    # CONNECTED MESSAGE
-    # -----------------------------------------------------
 
     await websocket.send_json(
         {
@@ -1018,12 +1735,9 @@ async def room_websocket(
                     name,
 
                 "is_host":
-                    (
-                        room[
-                            "host_member_id"
-                        ]
-                        ==
-                        member_id
+                    member_is_host(
+                        room_code,
+                        member_connection,
                     ),
             },
 
@@ -1040,10 +1754,6 @@ async def room_websocket(
     )
 
 
-    # -----------------------------------------------------
-    # ROOM STATE
-    # -----------------------------------------------------
-
     await websocket.send_json(
         {
             "type":
@@ -1055,6 +1765,26 @@ async def room_websocket(
             "room": {
                 "code":
                     room_code,
+
+                "name":
+                    room.get(
+                        "name",
+                        "Music Room",
+                    ),
+
+                "max_members":
+                    room.get(
+                        "max_members",
+                        8,
+                    ),
+
+                "is_locked":
+                    bool(
+                        room.get(
+                            "is_locked",
+                            False,
+                        )
+                    ),
 
                 "members":
                     room[
@@ -1069,6 +1799,11 @@ async def room_websocket(
                 "host_name":
                     room[
                         "host_name"
+                    ],
+
+                "playback_control_mode":
+                    room[
+                        "playback_control_mode"
                     ],
 
                 "queue":
@@ -1109,13 +1844,15 @@ async def room_websocket(
         room_code
     )
 
+    await broadcast_room_settings(
+        room_code
+    )
 
-    # -----------------------------------------------------
-    # RECEIVE EVENTS
-    # -----------------------------------------------------
 
     try:
+
         while True:
+
             message = (
                 await websocket.receive_text()
             )
@@ -1123,24 +1860,25 @@ async def room_websocket(
             await handle_room_message(
                 websocket,
                 room_code,
+                member_connection,
                 message,
             )
+
 
     except WebSocketDisconnect:
         pass
 
+
     except Exception as error:
+
         print(
             "WebSocket error:",
             error,
         )
 
 
-    # -----------------------------------------------------
-    # DISCONNECT
-    # -----------------------------------------------------
-
     finally:
+
         room_connections = (
             connections.get(
                 room_code,
@@ -1148,10 +1886,13 @@ async def room_websocket(
             )
         )
 
+
         if (
             member_connection
-            in room_connections
+            in
+            room_connections
         ):
+
             room_connections.remove(
                 member_connection
             )
@@ -1166,10 +1907,6 @@ async def room_websocket(
         ]
 
 
-        # -------------------------------------------------
-        # HOST LEFT
-        # -------------------------------------------------
-
         if (
             room.get(
                 "host_member_id"
@@ -1179,37 +1916,33 @@ async def room_websocket(
         ):
 
             if room_connections:
-                new_host = (
-                    room_connections[0]
-                )
 
                 set_room_host(
                     room_code,
-                    new_host,
+                    room_connections[0],
                 )
 
             else:
+
                 set_room_host(
                     room_code,
                     None,
                 )
 
 
-        # -------------------------------------------------
-        # MEMBERS STILL INSIDE
-        # -------------------------------------------------
-
         if room_connections:
+
             await broadcast_members(
                 room_code
             )
 
+            await broadcast_room_settings(
+                room_code
+            )
 
-        # -------------------------------------------------
-        # ROOM EMPTY
-        # -------------------------------------------------
 
         else:
+
             connections.pop(
                 room_code,
                 None,

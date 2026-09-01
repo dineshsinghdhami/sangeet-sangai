@@ -7,27 +7,45 @@ import {
 import "./App.css";
 
 
+/* =========================================================
+   CONFIG
+========================================================= */
+
 const API_BASE_URL =
   "http://127.0.0.1:8000";
 
 const WS_BASE_URL =
   "ws://127.0.0.1:8000";
 
-
 const DRIFT_CHECK_INTERVAL =
   3000;
 
-const SOFT_DRIFT_THRESHOLD =
-  0.25;
+const DRIFT_CORRECTION_THRESHOLD =
+  0.75;
 
-const HARD_DRIFT_THRESHOLD =
-  1.0;
+
+/* =========================================================
+   SESSION STORAGE
+
+   sessionStorage is used instead of localStorage.
+
+   This means:
+   - Refresh same tab -> reconnect
+   - New tab -> homepage
+   - Leave Room -> clear room
+========================================================= */
+
+const ROOM_STORAGE_KEY =
+  "sangeet_sangai_room";
+
+const NAME_STORAGE_KEY =
+  "sangeet_sangai_name";
 
 
 function App() {
-  // =====================================================
-  // BACKEND
-  // =====================================================
+  /* =======================================================
+     GENERAL STATE
+  ======================================================= */
 
   const [
     backendMessage,
@@ -36,20 +54,16 @@ function App() {
     "Connecting to backend..."
   );
 
-
-  // =====================================================
-  // USER
-  // =====================================================
-
   const [
     displayName,
     setDisplayName,
-  ] = useState("");
-
-
-  // =====================================================
-  // ROOM
-  // =====================================================
+  ] = useState(() => {
+    return (
+      sessionStorage.getItem(
+        NAME_STORAGE_KEY
+      ) || ""
+    );
+  });
 
   const [
     roomMessage,
@@ -93,10 +107,52 @@ function App() {
     "Disconnected"
   );
 
+  const [
+    currentMemberId,
+    setCurrentMemberId,
+  ] = useState(null);
 
-  // =====================================================
-  // UPLOAD
-  // =====================================================
+  const [
+    hostMemberId,
+    setHostMemberId,
+  ] = useState(null);
+
+  const [
+    playbackControlMode,
+    setPlaybackControlMode,
+  ] = useState(
+    "everyone"
+  );
+
+  const [
+    newRoomName,
+    setNewRoomName,
+  ] = useState("");
+
+  const [
+    roomName,
+    setRoomName,
+  ] = useState("");
+
+  const [
+    newRoomMaxMembers,
+    setNewRoomMaxMembers,
+  ] = useState(8);
+
+  const [
+    roomMaxMembers,
+    setRoomMaxMembers,
+  ] = useState(8);
+
+  const [
+    isRoomLocked,
+    setIsRoomLocked,
+  ] = useState(false);
+
+
+  /* =======================================================
+     UPLOAD STATE
+  ======================================================= */
 
   const [
     selectedFile,
@@ -114,9 +170,9 @@ function App() {
   ] = useState(false);
 
 
-  // =====================================================
-  // MUSIC
-  // =====================================================
+  /* =======================================================
+     MUSIC STATE
+  ======================================================= */
 
   const [
     queue,
@@ -156,9 +212,9 @@ function App() {
   );
 
 
-  // =====================================================
-  // REFERENCES
-  // =====================================================
+  /* =======================================================
+     REFS
+  ======================================================= */
 
   const socketRef =
     useRef(null);
@@ -175,12 +231,16 @@ function App() {
   const currentSongRef =
     useRef(null);
 
+  const reconnectAttemptedRef =
+    useRef(false);
+
   const playbackStateRef =
     useRef({
       current_song: null,
       is_playing: false,
       position: 0,
-      playback_started_at: null,
+      playback_started_at:
+        null,
     });
 
   const clockOffsetRef =
@@ -199,323 +259,359 @@ function App() {
     useRef(null);
 
 
-  // =====================================================
-  // REF UPDATES
-  // =====================================================
+  /* =======================================================
+     KEEP REFS UPDATED
+  ======================================================= */
 
-  useEffect(() => {
-    queueRef.current =
-      queue;
-  }, [queue]);
+  useEffect(
+    () => {
+      queueRef.current =
+        queue;
+    },
+    [queue]
+  );
+
+  useEffect(
+    () => {
+      currentSongRef.current =
+        currentSong;
+    },
+    [currentSong]
+  );
 
 
-  useEffect(() => {
-    currentSongRef.current =
-      currentSong;
-  }, [currentSong]);
+  /* =======================================================
+     SAVE NAME IN CURRENT TAB ONLY
+  ======================================================= */
+
+  useEffect(
+    () => {
+      const name =
+        displayName.trim();
+
+      if (name) {
+        sessionStorage.setItem(
+          NAME_STORAGE_KEY,
+          name
+        );
+      }
+    },
+    [displayName]
+  );
 
 
-  // =====================================================
-  // BACKEND STATUS
-  // =====================================================
+  /* =======================================================
+     BACKEND STATUS
+  ======================================================= */
 
-  useEffect(() => {
-    fetch(
-      `${API_BASE_URL}/api/status`
-    )
-      .then(
-        (response) => {
-          if (!response.ok) {
-            throw new Error(
-              "Backend unavailable"
+  useEffect(
+    () => {
+      fetch(
+        `${API_BASE_URL}/api/status`
+      )
+        .then(
+          (response) => {
+            if (
+              !response.ok
+            ) {
+              throw new Error(
+                "Backend unavailable"
+              );
+            }
+
+            return response.json();
+          }
+        )
+        .then(
+          (data) => {
+            setBackendMessage(
+              data.message
             );
           }
+        )
+        .catch(
+          (error) => {
+            console.error(
+              "Backend error:",
+              error
+            );
 
-          return response.json();
+            setBackendMessage(
+              "Failed to connect to backend"
+            );
+          }
+        );
+    },
+    []
+  );
+
+
+  /* =======================================================
+     CLEANUP
+  ======================================================= */
+
+  useEffect(
+    () => {
+      return () => {
+        if (
+          socketRef.current
+        ) {
+          socketRef.current.close();
         }
-      )
 
-      .then(
-        (data) => {
-          setBackendMessage(
-            data.message
-          );
-        }
-      )
-
-      .catch(
-        (error) => {
-          console.error(
-            "Backend error:",
-            error
-          );
-
-          setBackendMessage(
-            "Failed to connect to backend"
-          );
-        }
-      );
-  }, []);
-
-
-  // =====================================================
-  // CLEANUP
-  // =====================================================
-
-  useEffect(() => {
-    return () => {
-      if (
-        socketRef.current
-      ) {
-        socketRef.current.close();
-      }
-
-      if (
-        scheduledActionRef.current
-      ) {
-        clearTimeout(
+        if (
           scheduledActionRef.current
-        );
-      }
+        ) {
+          clearTimeout(
+            scheduledActionRef.current
+          );
+        }
 
-      if (
-        driftIntervalRef.current
-      ) {
-        clearInterval(
+        if (
           driftIntervalRef.current
-        );
+        ) {
+          clearInterval(
+            driftIntervalRef.current
+          );
+        }
+
+        if (
+          clockSyncIntervalRef.current
+        ) {
+          clearInterval(
+            clockSyncIntervalRef.current
+          );
+        }
+      };
+    },
+    []
+  );
+
+
+  /* =======================================================
+     HELPERS
+  ======================================================= */
+
+  const formatTime =
+    (seconds) => {
+      if (
+        !Number.isFinite(
+          seconds
+        ) ||
+        seconds < 0
+      ) {
+        return "0:00";
       }
+
+      const minutes =
+        Math.floor(
+          seconds / 60
+        );
+
+      const secondPart =
+        Math.floor(
+          seconds % 60
+        );
+
+      return `${minutes}:${secondPart
+        .toString()
+        .padStart(
+          2,
+          "0"
+        )}`;
+    };
+
+
+  const getInitial =
+    (text) => {
+      return (
+        text
+          ?.trim()
+          ?.charAt(0)
+          ?.toUpperCase() ||
+        "?"
+      );
+    };
+
+
+  const clampMaxMembers =
+    (value) => {
+      const numericValue =
+        Number(value);
 
       if (
-        clockSyncIntervalRef.current
+        !Number.isFinite(
+          numericValue
+        )
       ) {
-        clearInterval(
-          clockSyncIntervalRef.current
-        );
+        return 8;
       }
+
+      return Math.min(
+        20,
+        Math.max(
+          2,
+          numericValue
+        )
+      );
     };
-  }, []);
 
-
-  // =====================================================
-  // FORMAT TIME
-  // =====================================================
-
-  const formatTime = (
-    seconds
-  ) => {
-    if (
-      !Number.isFinite(
-        seconds
-      )
-      ||
-      seconds < 0
-    ) {
-      return "0:00";
-    }
-
-    const minutes =
-      Math.floor(
-        seconds / 60
-      );
-
-    const secondPart =
-      Math.floor(
-        seconds % 60
-      );
-
-    return `${minutes}:${secondPart
-      .toString()
-      .padStart(
-        2,
-        "0"
-      )}`;
-  };
-
-
-  // =====================================================
-  // ESTIMATED SERVER TIME
-  // =====================================================
 
   const getEstimatedServerTime =
     () => {
       return (
-        Date.now() / 1000
-        +
+        Date.now() /
+          1000 +
         clockOffsetRef.current
       );
     };
 
 
-  // =====================================================
-  // SEND EVENT
-  // =====================================================
+  /* =======================================================
+     WEBSOCKET HELPERS
+  ======================================================= */
 
-  const sendRoomEvent = (
-    event
-  ) => {
-    const socket =
-      socketRef.current;
+  const sendRoomEvent =
+    (event) => {
+      const socket =
+        socketRef.current;
 
-    if (
-      !socket
-      ||
-      socket.readyState
-      !== WebSocket.OPEN
-    ) {
-      return false;
-    }
+      if (
+        !socket ||
+        socket.readyState !==
+          WebSocket.OPEN
+      ) {
+        return false;
+      }
 
-    socket.send(
-      JSON.stringify(
-        event
-      )
-    );
+      socket.send(
+        JSON.stringify(
+          event
+        )
+      );
 
-    return true;
-  };
+      return true;
+    };
 
-
-  // =====================================================
-  // CLOCK SYNC REQUEST
-  // =====================================================
 
   const sendClockSyncRequest =
     () => {
-      sendRoomEvent(
-        {
-          type:
-            "sync_request",
+      sendRoomEvent({
+        type:
+          "sync_request",
 
-          client_time:
-            Date.now() / 1000,
-        }
+        client_time:
+          Date.now() /
+          1000,
+      });
+    };
+
+
+  const processClockSync =
+    (data) => {
+      const clientReceiveTime =
+        Date.now() / 1000;
+
+      const clientSendTime =
+        Number(
+          data.client_time
+        );
+
+      const serverTime =
+        Number(
+          data.server_time
+        );
+
+      if (
+        !Number.isFinite(
+          clientSendTime
+        ) ||
+        !Number.isFinite(
+          serverTime
+        )
+      ) {
+        return;
+      }
+
+      const roundTripTime =
+        clientReceiveTime -
+        clientSendTime;
+
+      const midpoint =
+        clientSendTime +
+        roundTripTime / 2;
+
+      const estimatedOffset =
+        serverTime -
+        midpoint;
+
+      clockSamplesRef.current.push(
+        estimatedOffset
+      );
+
+      if (
+        clockSamplesRef.current
+          .length > 7
+      ) {
+        clockSamplesRef.current.shift();
+      }
+
+      const sortedSamples =
+        [
+          ...clockSamplesRef.current,
+        ].sort(
+          (a, b) =>
+            a - b
+        );
+
+      const middle =
+        Math.floor(
+          sortedSamples.length /
+            2
+        );
+
+      clockOffsetRef.current =
+        sortedSamples[
+          middle
+        ];
+
+      if (
+        roundTripTime <
+        0.1
+      ) {
+        setSyncQuality(
+          "Excellent"
+        );
+      } else if (
+        roundTripTime <
+        0.25
+      ) {
+        setSyncQuality(
+          "Good"
+        );
+      } else {
+        setSyncQuality(
+          "Network delay"
+        );
+      }
+    };
+
+
+  const findSongById =
+    (songId) => {
+      return (
+        queueRef.current.find(
+          (song) =>
+            song.id ===
+            songId
+        ) || null
       );
     };
 
 
-  // =====================================================
-  // PROCESS CLOCK SYNC
-  // =====================================================
-
-  const processClockSync = (
-    data
-  ) => {
-    const clientReceiveTime =
-      Date.now() / 1000;
-
-    const clientSendTime =
-      Number(
-        data.client_time
-      );
-
-    const serverTime =
-      Number(
-        data.server_time
-      );
-
-    if (
-      !Number.isFinite(
-        clientSendTime
-      )
-      ||
-      !Number.isFinite(
-        serverTime
-      )
-    ) {
-      return;
-    }
-
-    const roundTripTime =
-      clientReceiveTime
-      -
-      clientSendTime;
-
-    const midpoint =
-      clientSendTime
-      +
-      roundTripTime / 2;
-
-    const estimatedOffset =
-      serverTime
-      -
-      midpoint;
-
-    clockSamplesRef.current.push(
-      estimatedOffset
-    );
-
-    if (
-      clockSamplesRef.current
-        .length > 7
-    ) {
-      clockSamplesRef.current.shift();
-    }
-
-    const sortedSamples =
-      [
-        ...clockSamplesRef.current
-      ].sort(
-        (a, b) =>
-          a - b
-      );
-
-    const middle =
-      Math.floor(
-        sortedSamples.length / 2
-      );
-
-    const medianOffset =
-      sortedSamples[
-        middle
-      ];
-
-    clockOffsetRef.current =
-      medianOffset;
-
-    if (
-      roundTripTime < 0.1
-    ) {
-      setSyncQuality(
-        "Excellent"
-      );
-
-    } else if (
-      roundTripTime < 0.25
-    ) {
-      setSyncQuality(
-        "Good"
-      );
-
-    } else {
-      setSyncQuality(
-        "Network delay detected"
-      );
-    }
-  };
-
-
-  // =====================================================
-  // FIND SONG
-  // =====================================================
-
-  const findSongById = (
-    songId
-  ) => {
-    return (
-      queueRef.current.find(
-        (song) =>
-          song.id === songId
-      )
-      ||
-      null
-    );
-  };
-
-
-  // =====================================================
-  // WAIT FOR AUDIO ELEMENT
-  // =====================================================
+  /* =======================================================
+     AUDIO WAIT HELPERS
+  ======================================================= */
 
   const waitForAudioElement =
     async () => {
@@ -543,14 +639,8 @@ function App() {
     };
 
 
-  // =====================================================
-  // WAIT FOR AUDIO METADATA
-  // =====================================================
-
   const waitForAudioReady =
-    async (
-      audio
-    ) => {
+    async (audio) => {
       if (
         audio.readyState >= 1
       ) {
@@ -562,20 +652,24 @@ function App() {
           let finished =
             false;
 
-          const finish = () => {
-            if (finished) {
-              return;
-            }
+          const finish =
+            () => {
+              if (
+                finished
+              ) {
+                return;
+              }
 
-            finished = true;
+              finished =
+                true;
 
-            audio.removeEventListener(
-              "loadedmetadata",
-              finish
-            );
+              audio.removeEventListener(
+                "loadedmetadata",
+                finish
+              );
 
-            resolve();
-          };
+              resolve();
+            };
 
           audio.addEventListener(
             "loadedmetadata",
@@ -594,24 +688,20 @@ function App() {
     };
 
 
-  // =====================================================
-  // EXPECTED PLAYBACK POSITION
-  // =====================================================
+  /* =======================================================
+     PLAYBACK POSITION
+  ======================================================= */
 
   const getExpectedPosition =
-    (
-      playbackState
-    ) => {
+    (playbackState) => {
       let position =
         Number(
-          playbackState.position
-          ||
-          0
+          playbackState.position ||
+            0
         );
 
       if (
-        !playbackState
-          .is_playing
+        !playbackState.is_playing
       ) {
         return Math.max(
           0,
@@ -621,8 +711,7 @@ function App() {
 
       const startedAt =
         Number(
-          playbackState
-            .playback_started_at
+          playbackState.playback_started_at
         );
 
       if (
@@ -642,12 +731,12 @@ function App() {
       const elapsed =
         Math.max(
           0,
-          serverNow
-          -
-          startedAt
+          serverNow -
+            startedAt
         );
 
-      position += elapsed;
+      position +=
+        elapsed;
 
       return Math.max(
         0,
@@ -656,14 +745,56 @@ function App() {
     };
 
 
-  // =====================================================
-  // APPLY SERVER PLAYBACK STATE
-  // =====================================================
+  /* =======================================================
+     CLEAR SONG
+  ======================================================= */
+
+  const clearCurrentSong =
+    () => {
+      if (
+        scheduledActionRef.current
+      ) {
+        clearTimeout(
+          scheduledActionRef.current
+        );
+
+        scheduledActionRef.current =
+          null;
+      }
+
+      if (
+        audioRef.current
+      ) {
+        audioRef.current.pause();
+      }
+
+      setCurrentSong(
+        null
+      );
+
+      currentSongRef.current =
+        null;
+
+      setIsPlaying(
+        false
+      );
+
+      setCurrentTime(
+        0
+      );
+
+      setDuration(
+        0
+      );
+    };
+
+
+  /* =======================================================
+     APPLY PLAYBACK STATE
+  ======================================================= */
 
   const applyPlaybackState =
-    async (
-      data
-    ) => {
+    async (data) => {
       playbackStateRef.current =
         {
           current_song:
@@ -676,35 +807,32 @@ function App() {
 
           position:
             Number(
-              data.position
-              ||
-              0
+              data.position ||
+                0
             ),
 
           playback_started_at:
             data.playback_started_at,
         };
 
-
       const song =
         findSongById(
           data.current_song
         );
 
-
       if (!song) {
+        clearCurrentSong();
         return;
       }
 
-
       const songChanged =
         currentSongRef.current
-          ?.id
-        !==
+          ?.id !==
         song.id;
 
-
-      if (songChanged) {
+      if (
+        songChanged
+      ) {
         if (
           audioRef.current
         ) {
@@ -727,10 +855,8 @@ function App() {
         );
       }
 
-
       const audio =
         await waitForAudioElement();
-
 
       if (!audio) {
         setPlayerMessage(
@@ -740,15 +866,15 @@ function App() {
         return;
       }
 
-
-      if (songChanged) {
+      if (
+        songChanged
+      ) {
         audio.load();
 
         await waitForAudioReady(
           audio
         );
       }
-
 
       if (
         scheduledActionRef.current
@@ -761,35 +887,33 @@ function App() {
           null;
       }
 
-
       const executeAt =
         Number(
           data.execute_at
         );
-
 
       const executeAction =
         async () => {
           const activeAudio =
             audioRef.current;
 
-          if (!activeAudio) {
+          if (
+            !activeAudio
+          ) {
             return;
           }
-
 
           let targetPosition =
             getExpectedPosition(
               playbackStateRef.current
             );
 
-
           if (
             Number.isFinite(
               activeAudio.duration
-            )
-            &&
-            activeAudio.duration > 0
+            ) &&
+            activeAudio.duration >
+              0
           ) {
             targetPosition =
               Math.min(
@@ -798,30 +922,27 @@ function App() {
               );
           }
 
-
           try {
             activeAudio.currentTime =
               Math.max(
                 0,
                 targetPosition
               );
-
-          } catch (error) {
+          } catch (
+            error
+          ) {
             console.warn(
               "Seek failed:",
               error
             );
           }
 
-
           setCurrentTime(
             targetPosition
           );
 
-
           if (
-            playbackStateRef
-              .current
+            playbackStateRef.current
               .is_playing
           ) {
             try {
@@ -834,8 +955,9 @@ function App() {
               setPlayerMessage(
                 ""
               );
-
-            } catch (error) {
+            } catch (
+              error
+            ) {
               console.error(
                 "Playback blocked:",
                 error
@@ -849,7 +971,6 @@ function App() {
                 "Browser blocked automatic playback. Click Play once on this device."
               );
             }
-
           } else {
             activeAudio.pause();
 
@@ -858,7 +979,6 @@ function App() {
             );
           }
         };
-
 
       if (
         Number.isFinite(
@@ -872,14 +992,10 @@ function App() {
           Math.max(
             0,
             (
-              executeAt
-              -
+              executeAt -
               serverNow
-            )
-            *
-            1000
+            ) * 1000
           );
-
 
         if (
           delayMs > 10
@@ -889,20 +1005,18 @@ function App() {
               executeAction,
               delayMs
             );
-
         } else {
           await executeAction();
         }
-
       } else {
         await executeAction();
       }
     };
 
 
-  // =====================================================
-  // DRIFT CORRECTION
-  // =====================================================
+  /* =======================================================
+     DRIFT CORRECTION
+  ======================================================= */
 
   const correctPlaybackDrift =
     () => {
@@ -912,32 +1026,26 @@ function App() {
       const state =
         playbackStateRef.current;
 
-
       if (
-        !audio
-        ||
-        !state.is_playing
-        ||
-        !state.current_song
-        ||
+        !audio ||
+        !state.is_playing ||
+        !state.current_song ||
         audio.paused
       ) {
         return;
       }
-
 
       let expectedPosition =
         getExpectedPosition(
           state
         );
 
-
       if (
         Number.isFinite(
           audio.duration
-        )
-        &&
-        audio.duration > 0
+        ) &&
+        audio.duration >
+          0
       ) {
         expectedPosition =
           Math.min(
@@ -946,25 +1054,16 @@ function App() {
           );
       }
 
-
       const drift =
-        expectedPosition
-        -
+        expectedPosition -
         audio.currentTime;
-
 
       if (
         Math.abs(
           drift
-        )
-        >
+        ) >
         DRIFT_CORRECTION_THRESHOLD
       ) {
-        console.log(
-          "Correcting playback drift:",
-          drift
-        );
-
         try {
           audio.currentTime =
             expectedPosition;
@@ -972,8 +1071,9 @@ function App() {
           setCurrentTime(
             expectedPosition
           );
-
-        } catch (error) {
+        } catch (
+          error
+        ) {
           console.warn(
             "Drift correction failed:",
             error
@@ -983,9 +1083,9 @@ function App() {
     };
 
 
-  // =====================================================
-  // START SYNC SERVICES
-  // =====================================================
+  /* =======================================================
+     START SYNC
+  ======================================================= */
 
   const startSynchronization =
     () => {
@@ -1005,8 +1105,6 @@ function App() {
         );
       }
 
-
-      // Multiple samples initially.
       sendClockSyncRequest();
 
       setTimeout(
@@ -1029,16 +1127,12 @@ function App() {
         800
       );
 
-
-      // Refresh clock offset.
       clockSyncIntervalRef.current =
         setInterval(
           sendClockSyncRequest,
           10000
         );
 
-
-      // Fix playback drift.
       driftIntervalRef.current =
         setInterval(
           correctPlaybackDrift,
@@ -1047,25 +1141,45 @@ function App() {
     };
 
 
-  // =====================================================
-  // CONNECT ROOM
-  // =====================================================
+  /* =======================================================
+     CONNECT TO ROOM
+  ======================================================= */
 
   const connectToRoom =
     (
       code,
       name
     ) => {
+      const normalizedCode =
+        code
+          .trim()
+          .toUpperCase();
+
+      const normalizedName =
+        name.trim();
+
       if (
         socketRef.current
       ) {
-        socketRef.current.close();
+        try {
+          socketRef.current.close();
+        } catch (
+          error
+        ) {
+          console.warn(
+            "Previous socket close failed:",
+            error
+          );
+        }
       }
 
+      setMembers(
+        []
+      );
 
-      setMembers([]);
-
-      setQueue([]);
+      setQueue(
+        []
+      );
 
       queueRef.current =
         [];
@@ -1093,23 +1207,62 @@ function App() {
         "Connecting..."
       );
 
+      setPlayerMessage(
+        ""
+      );
+
+      setUploadMessage(
+        ""
+      );
+
+      setJoinMessage(
+        ""
+      );
+
+      setRoomMessage(
+        ""
+      );
+
+      /*
+       * Set immediately so refresh does not flash homepage.
+       */
+      setCurrentRoom(
+        normalizedCode
+      );
 
       const socket =
         new WebSocket(
-          `${WS_BASE_URL}/ws/rooms/${code}?name=${encodeURIComponent(
-            name
+          `${WS_BASE_URL}/ws/rooms/${normalizedCode}?name=${encodeURIComponent(
+            normalizedName
           )}`
         );
-
 
       socketRef.current =
         socket;
 
 
+      /* ---------------------------------------------------
+         SOCKET OPEN
+      --------------------------------------------------- */
+
       socket.onopen =
         () => {
           setCurrentRoom(
-            code
+            normalizedCode
+          );
+
+          /*
+           * IMPORTANT:
+           * Save only in current browser tab.
+           */
+          sessionStorage.setItem(
+            ROOM_STORAGE_KEY,
+            normalizedCode
+          );
+
+          sessionStorage.setItem(
+            NAME_STORAGE_KEY,
+            normalizedName
           );
 
           setConnectionStatus(
@@ -1120,16 +1273,20 @@ function App() {
         };
 
 
+      /* ---------------------------------------------------
+         SOCKET MESSAGE
+      --------------------------------------------------- */
+
       socket.onmessage =
-        async (
-          event
-        ) => {
+        async (event) => {
           try {
             const data =
               JSON.parse(
                 event.data
               );
 
+
+            /* CLOCK SYNC */
 
             if (
               data.type ===
@@ -1143,6 +1300,8 @@ function App() {
             }
 
 
+            /* CONNECTED */
+
             if (
               data.type ===
               "connected"
@@ -1151,21 +1310,64 @@ function App() {
                 data.room_code
               );
 
+              sessionStorage.setItem(
+                ROOM_STORAGE_KEY,
+                data.room_code
+              );
+
+              sessionStorage.setItem(
+                NAME_STORAGE_KEY,
+                normalizedName
+              );
+
               setConnectionStatus(
                 "Connected"
               );
+
+              setCurrentMemberId(
+                data.member?.id ||
+                  null
+              );
+
+              setHostMemberId(
+                data.host_member_id ||
+                  null
+              );
             }
 
+
+            /* ROOM STATE */
 
             if (
               data.type ===
               "room_state"
             ) {
-              const roomQueue =
-                data.room.queue
-                ||
-                [];
+              setRoomName(
+                data.room.name ||
+                  "Music Room"
+              );
 
+              setRoomMaxMembers(
+                Number(
+                  data.room
+                    .max_members ||
+                    8
+                )
+              );
+
+              setIsRoomLocked(
+                Boolean(
+                  data.room
+                    .is_locked
+                )
+              );
+
+              const roomQueue =
+                Array.isArray(
+                  data.room.queue
+                )
+                  ? data.room.queue
+                  : [];
 
               setQueue(
                 roomQueue
@@ -1174,6 +1376,17 @@ function App() {
               queueRef.current =
                 roomQueue;
 
+              setHostMemberId(
+                data.room
+                  .host_member_id ||
+                  null
+              );
+
+              setPlaybackControlMode(
+                data.room
+                  .playback_control_mode ||
+                  "everyone"
+              );
 
               if (
                 data.room
@@ -1201,32 +1414,190 @@ function App() {
                       null,
                   }
                 );
+              } else {
+                clearCurrentSong();
               }
             }
 
+
+            /* MEMBERS */
 
             if (
               data.type ===
               "members_updated"
             ) {
               setMembers(
-                data.members
+                data.members ||
+                  []
               );
+
+              setHostMemberId(
+                data.host_member_id ||
+                  null
+              );
+
+              if (
+                data.max_members
+              ) {
+                setRoomMaxMembers(
+                  Number(
+                    data.max_members
+                  )
+                );
+              }
             }
 
+
+            /* QUEUE */
 
             if (
               data.type ===
               "queue_updated"
             ) {
+              const updatedQueue =
+                Array.isArray(
+                  data.queue
+                )
+                  ? data.queue
+                  : [];
+
               setQueue(
-                data.queue
+                updatedQueue
               );
 
               queueRef.current =
-                data.queue;
+                updatedQueue;
+
+              if (
+                currentSongRef.current &&
+                !updatedQueue.some(
+                  (song) =>
+                    song.id ===
+                    currentSongRef
+                      .current.id
+                )
+              ) {
+                clearCurrentSong();
+              }
             }
 
+
+            if (
+              data.type ===
+              "queue_action_result"
+            ) {
+              setPlayerMessage(
+                data.message ||
+                  "Queue updated"
+              );
+            }
+
+
+            /* ROOM SETTINGS */
+
+            if (
+              data.type ===
+              "room_settings"
+            ) {
+              setPlaybackControlMode(
+                data.playback_control_mode ||
+                  "everyone"
+              );
+
+              setHostMemberId(
+                data.host_member_id ||
+                  null
+              );
+
+              setIsRoomLocked(
+                Boolean(
+                  data.is_locked
+                )
+              );
+
+              if (
+                data.max_members
+              ) {
+                setRoomMaxMembers(
+                  Number(
+                    data.max_members
+                  )
+                );
+              }
+            }
+
+
+            /* ROOM LOCKED */
+
+            if (
+              data.type ===
+              "room_locked"
+            ) {
+              setJoinMessage(
+                data.message ||
+                  "Room is locked"
+              );
+
+              sessionStorage.removeItem(
+                ROOM_STORAGE_KEY
+              );
+
+              setCurrentRoom(
+                ""
+              );
+
+              setConnectionStatus(
+                "Disconnected"
+              );
+
+              socket.close();
+
+              return;
+            }
+
+
+            /* ROOM FULL */
+
+            if (
+              data.type ===
+              "room_full"
+            ) {
+              setJoinMessage(
+                data.message ||
+                  "Room is full"
+              );
+
+              sessionStorage.removeItem(
+                ROOM_STORAGE_KEY
+              );
+
+              setCurrentRoom(
+                ""
+              );
+
+              setConnectionStatus(
+                "Disconnected"
+              );
+
+              socket.close();
+
+              return;
+            }
+
+
+            /* PERMISSION ERROR */
+
+            if (
+              data.type ===
+              "permission_error"
+            ) {
+              setPlayerMessage(
+                data.message
+              );
+            }
+
+
+            /* PLAYBACK */
 
             if (
               data.type ===
@@ -1238,6 +1609,8 @@ function App() {
             }
 
 
+            /* ERROR */
+
             if (
               data.type ===
               "error"
@@ -1246,8 +1619,9 @@ function App() {
                 data.message
               );
             }
-
-          } catch (error) {
+          } catch (
+            error
+          ) {
             console.error(
               "WebSocket message error:",
               error
@@ -1255,6 +1629,10 @@ function App() {
           }
         };
 
+
+      /* ---------------------------------------------------
+         SOCKET ERROR
+      --------------------------------------------------- */
 
       socket.onerror =
         (error) => {
@@ -1269,6 +1647,10 @@ function App() {
         };
 
 
+      /* ---------------------------------------------------
+         SOCKET CLOSE
+      --------------------------------------------------- */
+
       socket.onclose =
         () => {
           setConnectionStatus(
@@ -1278,15 +1660,148 @@ function App() {
     };
 
 
-  // =====================================================
-  // CREATE ROOM
-  // =====================================================
+  /* =======================================================
+     RESTORE SAME TAB AFTER REFRESH
+  ======================================================= */
+
+  useEffect(
+    () => {
+      if (
+        reconnectAttemptedRef.current
+      ) {
+        return;
+      }
+
+      reconnectAttemptedRef.current =
+        true;
+
+      const savedRoom =
+        sessionStorage.getItem(
+          ROOM_STORAGE_KEY
+        );
+
+      const savedName =
+        sessionStorage.getItem(
+          NAME_STORAGE_KEY
+        );
+
+      /*
+       * New tab does not have these values,
+       * therefore it stays on homepage.
+       */
+      if (
+        !savedRoom ||
+        !savedName
+      ) {
+        return;
+      }
+
+      /*
+       * Same tab refresh:
+       * show room while reconnecting.
+       */
+      setCurrentRoom(
+        savedRoom
+      );
+
+      setDisplayName(
+        savedName
+      );
+
+      setConnectionStatus(
+        "Reconnecting..."
+      );
+
+
+      const reconnect =
+        async () => {
+          try {
+            const response =
+              await fetch(
+                `${API_BASE_URL}/api/rooms/${savedRoom}`
+              );
+
+            if (
+              !response.ok
+            ) {
+              throw new Error(
+                "Room no longer exists"
+              );
+            }
+
+            const data =
+              await response.json();
+
+            setRoomName(
+              data.room.name ||
+                "Music Room"
+            );
+
+            setRoomMaxMembers(
+              Number(
+                data.room
+                  .max_members ||
+                  8
+              )
+            );
+
+            setIsRoomLocked(
+              Boolean(
+                data.room
+                  .is_locked
+              )
+            );
+
+            setPlaybackControlMode(
+              data.room
+                .playback_control_mode ||
+                "everyone"
+            );
+
+            connectToRoom(
+              savedRoom,
+              savedName
+            );
+          } catch (
+            error
+          ) {
+            console.error(
+              "Room reconnect failed:",
+              error
+            );
+
+            /*
+             * Room doesn't exist anymore.
+             * Clear only current tab.
+             */
+            sessionStorage.removeItem(
+              ROOM_STORAGE_KEY
+            );
+
+            setCurrentRoom(
+              ""
+            );
+
+            setConnectionStatus(
+              "Disconnected"
+            );
+          }
+        };
+
+      reconnect();
+    },
+    []
+  );
+
+
+  /* =======================================================
+     CREATE ROOM
+  ======================================================= */
 
   const createRoom =
     async () => {
       const name =
         displayName.trim();
-
 
       if (!name) {
         setRoomMessage(
@@ -1296,14 +1811,14 @@ function App() {
         return;
       }
 
-
       try {
         setIsCreatingRoom(
           true
         );
 
-        setRoomMessage("");
-
+        setRoomMessage(
+          ""
+        );
 
         const response =
           await fetch(
@@ -1311,35 +1826,89 @@ function App() {
             {
               method:
                 "POST",
+
+              headers: {
+                "Content-Type":
+                  "application/json",
+              },
+
+              body:
+                JSON.stringify(
+                  {
+                    name:
+                      newRoomName.trim(),
+
+                    max_members:
+                      clampMaxMembers(
+                        newRoomMaxMembers
+                      ),
+                  }
+                ),
             }
           );
-
 
         const data =
           await response.json();
 
-
-        if (!response.ok) {
+        if (
+          !response.ok
+        ) {
           throw new Error(
             data.detail
           );
         }
 
+        const code =
+          data.room.code;
 
-        connectToRoom(
-          data.room.code,
+        setRoomName(
+          data.room.name ||
+            "Music Room"
+        );
+
+        setRoomMaxMembers(
+          Number(
+            data.room
+              .max_members ||
+              newRoomMaxMembers
+          )
+        );
+
+        setIsRoomLocked(
+          Boolean(
+            data.room
+              .is_locked
+          )
+        );
+
+        /*
+         * Save only for this tab.
+         */
+        sessionStorage.setItem(
+          ROOM_STORAGE_KEY,
+          code
+        );
+
+        sessionStorage.setItem(
+          NAME_STORAGE_KEY,
           name
         );
 
-      } catch (error) {
+        connectToRoom(
+          code,
+          name
+        );
+      } catch (
+        error
+      ) {
         console.error(
           error
         );
 
         setRoomMessage(
-          "Failed to create room"
+          error.message ||
+            "Failed to create room"
         );
-
       } finally {
         setIsCreatingRoom(
           false
@@ -1348,9 +1917,9 @@ function App() {
     };
 
 
-  // =====================================================
-  // JOIN ROOM
-  // =====================================================
+  /* =======================================================
+     JOIN ROOM
+  ======================================================= */
 
   const joinRoom =
     async () => {
@@ -1362,7 +1931,6 @@ function App() {
           .trim()
           .toUpperCase();
 
-
       if (!name) {
         setJoinMessage(
           "Please enter your name first"
@@ -1370,7 +1938,6 @@ function App() {
 
         return;
       }
-
 
       if (!code) {
         setJoinMessage(
@@ -1380,46 +1947,92 @@ function App() {
         return;
       }
 
-
       try {
         setIsJoiningRoom(
           true
         );
 
-        setJoinMessage("");
-
+        setJoinMessage(
+          ""
+        );
 
         const response =
           await fetch(
             `${API_BASE_URL}/api/rooms/${code}`
           );
 
-
         const data =
           await response.json();
 
-
-        if (!response.ok) {
+        if (
+          !response.ok
+        ) {
           throw new Error(
             data.detail
           );
         }
 
+        if (
+          data.room.is_locked
+        ) {
+          throw new Error(
+            "Room is locked. Ask the host to unlock it."
+          );
+        }
+
+        const maximumMembers =
+          Number(
+            data.room
+              .max_members ||
+              8
+          );
+
+        const currentMembers =
+          Array.isArray(
+            data.room.members
+          )
+            ? data.room.members
+                .length
+            : 0;
+
+        if (
+          currentMembers >=
+          maximumMembers
+        ) {
+          throw new Error(
+            `Room is full (${currentMembers}/${maximumMembers})`
+          );
+        }
+
+        setRoomMaxMembers(
+          maximumMembers
+        );
+
+        sessionStorage.setItem(
+          ROOM_STORAGE_KEY,
+          code
+        );
+
+        sessionStorage.setItem(
+          NAME_STORAGE_KEY,
+          name
+        );
 
         connectToRoom(
           code,
           name
         );
-
-      } catch (error) {
+      } catch (
+        error
+      ) {
         console.error(
           error
         );
 
         setJoinMessage(
-          "Room not found"
+          error.message ||
+            "Unable to join room"
         );
-
       } finally {
         setIsJoiningRoom(
           false
@@ -1428,20 +2041,18 @@ function App() {
     };
 
 
-  // =====================================================
-  // FILE SELECTION
-  // =====================================================
+  /* =======================================================
+     FILE SELECT
+  ======================================================= */
 
   const handleFileChange =
-    (
-      event
-    ) => {
+    (event) => {
       const file =
         event.target.files[0];
 
-
-      setUploadMessage("");
-
+      setUploadMessage(
+        ""
+      );
 
       if (!file) {
         setSelectedFile(
@@ -1451,17 +2062,14 @@ function App() {
         return;
       }
 
-
       const maxSize =
-        25
-        *
-        1024
-        *
+        25 *
+        1024 *
         1024;
 
-
       if (
-        file.size > maxSize
+        file.size >
+        maxSize
       ) {
         setUploadMessage(
           "Maximum file size is 25 MB."
@@ -1477,27 +2085,27 @@ function App() {
         return;
       }
 
-
       setSelectedFile(
         file
       );
     };
 
 
-  // =====================================================
-  // UPLOAD
-  // =====================================================
+  /* =======================================================
+     UPLOAD SONG
+  ======================================================= */
 
   const uploadSong =
     async () => {
-      if (!selectedFile) {
+      if (
+        !selectedFile
+      ) {
         setUploadMessage(
-          "Please select a song"
+          "Please choose a song first"
         );
 
         return;
       }
-
 
       try {
         setIsUploading(
@@ -1508,22 +2116,18 @@ function App() {
           "Uploading..."
         );
 
-
         const formData =
           new FormData();
-
 
         formData.append(
           "file",
           selectedFile
         );
 
-
         formData.append(
           "uploader_name",
           displayName
         );
-
 
         const response =
           await fetch(
@@ -1537,27 +2141,24 @@ function App() {
             }
           );
 
-
         const data =
           await response.json();
 
-
-        if (!response.ok) {
+        if (
+          !response.ok
+        ) {
           throw new Error(
             data.detail
           );
         }
 
-
         setUploadMessage(
           "Song uploaded successfully"
         );
 
-
         setSelectedFile(
           null
         );
-
 
         if (
           fileInputRef.current
@@ -1565,18 +2166,17 @@ function App() {
           fileInputRef.current.value =
             "";
         }
-
-      } catch (error) {
+      } catch (
+        error
+      ) {
         console.error(
           error
         );
 
         setUploadMessage(
-          error.message
-          ||
-          "Upload failed"
+          error.message ||
+            "Upload failed"
         );
-
       } finally {
         setIsUploading(
           false
@@ -1585,27 +2185,100 @@ function App() {
     };
 
 
-  // =====================================================
-  // PLAYER COMMANDS
-  // =====================================================
+  /* =======================================================
+     ROLE / PERMISSIONS
+  ======================================================= */
+
+  const isHost =
+    Boolean(
+      currentMemberId &&
+        hostMemberId &&
+        currentMemberId ===
+          hostMemberId
+    );
+
+  const canControlPlayback =
+    playbackControlMode ===
+      "everyone" ||
+    isHost;
+
+
+  /* =======================================================
+     ROOM SETTINGS
+  ======================================================= */
+
+  const changePlaybackMode =
+    (mode) => {
+      if (!isHost) {
+        return;
+      }
+
+      sendRoomEvent({
+        type:
+          "set_playback_mode",
+
+        mode,
+      });
+    };
+
+
+  const changeRoomLock =
+    () => {
+      if (!isHost) {
+        return;
+      }
+
+      sendRoomEvent({
+        type:
+          "set_room_lock",
+
+        locked:
+          !isRoomLocked,
+      });
+    };
+
+
+  /* =======================================================
+     QUEUE / PLAYER
+  ======================================================= */
 
   const selectSong =
     (song) => {
-      sendRoomEvent(
-        {
-          type:
-            "select_song",
+      if (
+        !canControlPlayback
+      ) {
+        setPlayerMessage(
+          "Only the host can control playback."
+        );
 
-          song_id:
-            song.id,
-        }
-      );
+        return;
+      }
+
+      sendRoomEvent({
+        type:
+          "select_song",
+
+        song_id:
+          song.id,
+      });
     };
 
 
   const togglePlayPause =
     () => {
-      if (!currentSong) {
+      if (
+        !canControlPlayback
+      ) {
+        setPlayerMessage(
+          "Only the host can control playback."
+        );
+
+        return;
+      }
+
+      if (
+        !currentSong
+      ) {
         setPlayerMessage(
           "Select a song first"
         );
@@ -1613,100 +2286,160 @@ function App() {
         return;
       }
 
-
       const audio =
         audioRef.current;
-
 
       if (!audio) {
         return;
       }
 
-
-      if (isPlaying) {
-        sendRoomEvent(
-          {
-            type:
-              "pause",
-          }
-        );
-
+      if (
+        isPlaying
+      ) {
+        sendRoomEvent({
+          type:
+            "pause",
+        });
       } else {
-        sendRoomEvent(
-          {
-            type:
-              "play",
+        sendRoomEvent({
+          type:
+            "play",
 
-            song_id:
-              currentSong.id,
+          song_id:
+            currentSong.id,
 
-            position:
-              audio.currentTime,
-          }
-        );
+          position:
+            audio.currentTime,
+        });
       }
     };
 
 
   const handleSeek =
-    (
-      event
-    ) => {
-      if (!currentSong) {
+    (event) => {
+      if (
+        !canControlPlayback
+      ) {
+        setPlayerMessage(
+          "Only the host can control playback."
+        );
+
         return;
       }
 
+      if (
+        !currentSong
+      ) {
+        return;
+      }
 
       const position =
         Number(
           event.target.value
         );
 
-
       setCurrentTime(
         position
       );
 
+      sendRoomEvent({
+        type:
+          "seek",
 
-      sendRoomEvent(
-        {
-          type:
-            "seek",
+        song_id:
+          currentSong.id,
 
-          song_id:
-            currentSong.id,
-
-          position,
-        }
-      );
+        position,
+      });
     };
 
 
   const playNextSong =
     () => {
-      sendRoomEvent(
-        {
-          type:
-            "next",
-        }
-      );
+      if (
+        !canControlPlayback
+      ) {
+        setPlayerMessage(
+          "Only the host can control playback."
+        );
+
+        return;
+      }
+
+      sendRoomEvent({
+        type:
+          "next",
+      });
     };
 
 
   const playPreviousSong =
     () => {
-      sendRoomEvent(
-        {
-          type:
-            "previous",
-        }
-      );
+      if (
+        !canControlPlayback
+      ) {
+        setPlayerMessage(
+          "Only the host can control playback."
+        );
+
+        return;
+      }
+
+      sendRoomEvent({
+        type:
+          "previous",
+      });
     };
 
 
-  // =====================================================
-  // AUDIO EVENTS
-  // =====================================================
+  const removeSong =
+    (song) => {
+      if (!isHost) {
+        setPlayerMessage(
+          "Only the host can remove songs."
+        );
+
+        return;
+      }
+
+      sendRoomEvent({
+        type:
+          "remove_song",
+
+        song_id:
+          song.id,
+      });
+    };
+
+
+  const moveSong =
+    (
+      song,
+      direction
+    ) => {
+      if (!isHost) {
+        setPlayerMessage(
+          "Only the host can reorder songs."
+        );
+
+        return;
+      }
+
+      sendRoomEvent({
+        type:
+          "move_song",
+
+        song_id:
+          song.id,
+
+        direction,
+      });
+    };
+
+
+  /* =======================================================
+     AUDIO EVENTS
+  ======================================================= */
 
   const handleLoadedMetadata =
     () => {
@@ -1721,10 +2454,8 @@ function App() {
         Number.isFinite(
           audio.duration
         )
-          ?
-          audio.duration
-          :
-          0
+          ? audio.duration
+          : 0
       );
     };
 
@@ -1732,15 +2463,13 @@ function App() {
   const handleTimeUpdate =
     () => {
       if (
-        !audioRef.current
-      ) {
-        return;
-      }
-
-      setCurrentTime(
         audioRef.current
-          .currentTime
-      );
+      ) {
+        setCurrentTime(
+          audioRef.current
+            .currentTime
+        );
+      }
     };
 
 
@@ -1774,27 +2503,42 @@ function App() {
 
   const handleSongEnded =
     () => {
-      sendRoomEvent(
-        {
-          type:
-            "next",
-        }
-      );
+      if (!isHost) {
+        return;
+      }
+
+      sendRoomEvent({
+        type:
+          "next",
+      });
     };
 
 
-  // =====================================================
-  // LEAVE
-  // =====================================================
+  /* =======================================================
+     LEAVE ROOM
+
+     This is where the current tab's session is cleared.
+  ======================================================= */
 
   const leaveRoom =
     () => {
+      sessionStorage.removeItem(
+        ROOM_STORAGE_KEY
+      );
+
+      sessionStorage.removeItem(
+        NAME_STORAGE_KEY
+      );
+
       if (
         scheduledActionRef.current
       ) {
         clearTimeout(
           scheduledActionRef.current
         );
+
+        scheduledActionRef.current =
+          null;
       }
 
       if (
@@ -1803,6 +2547,9 @@ function App() {
         clearInterval(
           driftIntervalRef.current
         );
+
+        driftIntervalRef.current =
+          null;
       }
 
       if (
@@ -1811,6 +2558,9 @@ function App() {
         clearInterval(
           clockSyncIntervalRef.current
         );
+
+        clockSyncIntervalRef.current =
+          null;
       }
 
       if (
@@ -1828,12 +2578,45 @@ function App() {
         audioRef.current.pause();
       }
 
+      setCurrentRoom(
+        ""
+      );
 
-      setCurrentRoom("");
+      setDisplayName(
+        ""
+      );
 
-      setMembers([]);
+      setMembers(
+        []
+      );
 
-      setQueue([]);
+      setCurrentMemberId(
+        null
+      );
+
+      setHostMemberId(
+        null
+      );
+
+      setPlaybackControlMode(
+        "everyone"
+      );
+
+      setRoomName(
+        ""
+      );
+
+      setRoomMaxMembers(
+        8
+      );
+
+      setIsRoomLocked(
+        false
+      );
+
+      setQueue(
+        []
+      );
 
       queueRef.current =
         [];
@@ -1857,9 +2640,13 @@ function App() {
         0
       );
 
-      setUploadMessage("");
+      setUploadMessage(
+        ""
+      );
 
-      setPlayerMessage("");
+      setPlayerMessage(
+        ""
+      );
 
       setConnectionStatus(
         "Disconnected"
@@ -1871,151 +2658,214 @@ function App() {
     };
 
 
-  // =====================================================
-  // ROOM SCREEN
-  // =====================================================
+  /* =======================================================
+     ROOM PAGE
+  ======================================================= */
 
-  if (currentRoom) {
+  if (
+    currentRoom
+  ) {
     return (
-      <main className="app">
+      <main className="app-page room-app">
+        {/* HEADER */}
 
-        <section className="hero">
-
-          <h1>
-            Sangeet Sangai
-          </h1>
-
-          <p className="subtitle">
-            Listen together,
-            wherever you are.
-          </p>
-
-        </section>
-
-
-        <section className="active-room">
-
-          <div className="room-header">
-
-            <div>
-
-              <p className="room-label">
-                Current Room
-              </p>
-
-              <h2>
-                {currentRoom}
-              </h2>
-
+        <header className="room-topbar">
+          <div className="brand-block">
+            <div className="brand-logo">
+              ♪
             </div>
 
+            <div className="brand-text">
+              <h1>
+                Sangeet Sangai
+              </h1>
+
+              <p>
+                {roomName ||
+                  "Music Room"}
+                {" • "}
+                {currentRoom}
+              </p>
+            </div>
+          </div>
+
+
+          <div className="topbar-right">
+            <div className="connection-inline">
+              <span className="dot-green" />
+
+              <span>
+                {
+                  connectionStatus
+                }
+              </span>
+            </div>
 
             <button
-              className="leave-button"
+              className="btn btn-danger-outline"
               onClick={
                 leaveRoom
               }
             >
               Leave Room
             </button>
-
           </div>
+        </header>
 
 
-          <div className="connection-info">
+        {/* MAIN ROOM */}
 
-            WebSocket:
+        <section className="music-room-layout">
+          {/* =============================================
+              LEFT SIDEBAR
+          ============================================= */}
 
-            <strong>
-              {" "}
-              {connectionStatus}
-            </strong>
+          <aside className="music-sidebar">
+            {/* ROOM CODE */}
 
-            {" · "}
-
-            Sync:
-
-            <strong>
-              {" "}
-              {syncQuality}
-            </strong>
-
-          </div>
-
-
-          <section className="members-section">
-
-            <div className="section-heading">
-
-              <h3>
-                Members
-              </h3>
-
-              <span>
-                {members.length}
+            <div className="sidebar-room">
+              <span className="sidebar-small-label">
+                ROOM CODE
               </span>
 
-            </div>
+              <button
+                className="sidebar-room-code copy-room-code"
+                onClick={
+                  async () => {
+                    try {
+                      await navigator.clipboard.writeText(
+                        currentRoom
+                      );
 
-
-            <div className="members-list">
-
-              {members.map(
-                (member) => (
-
-                  <div
-                    className="member"
-                    key={
-                      member.id
+                      setPlayerMessage(
+                        "Room code copied"
+                      );
+                    } catch (
+                      error
+                    ) {
+                      console.error(
+                        "Copy failed:",
+                        error
+                      );
                     }
-                  >
+                  }
+                }
+                title="Click to copy room code"
+              >
+                <span>
+                  {
+                    currentRoom
+                  }
+                </span>
 
-                    <div className="member-avatar">
-
-                      {member.name
-                        .charAt(0)
-                        .toUpperCase()}
-
-                    </div>
+                <span className="copy-hint">
+                  Copy
+                </span>
+              </button>
 
 
-                    <span>
-                      {member.name}
-                    </span>
+              <div className="sidebar-room-meta">
+                <span
+                  className={
+                    isHost
+                      ? "simple-role host"
+                      : "simple-role"
+                  }
+                >
+                  {isHost
+                    ? "Host"
+                    : "Member"}
+                </span>
 
-                  </div>
-
-                )
-              )}
-
+                <span>
+                  {
+                    members.length
+                  }
+                  /
+                  {
+                    roomMaxMembers
+                  }
+                </span>
+              </div>
             </div>
 
-          </section>
+
+            <div className="sidebar-divider" />
 
 
-          <section className="upload-section">
+            {/* MEMBERS */}
 
-            <h3>
-              Add Music
-            </h3>
+            <div className="sidebar-section members-section">
+              <div className="sidebar-section-head">
+                <span>
+                  Members
+                </span>
 
-            <p>
-              Uploaded music exists
-              only temporarily.
-            </p>
+                <span className="sidebar-count">
+                  {
+                    members.length
+                  }
+                </span>
+              </div>
 
 
-            <div className="upload-controls">
+              <div className="sidebar-members">
+                {members.map(
+                  (
+                    member
+                  ) => (
+                    <div
+                      key={
+                        member.id
+                      }
+                      className="sidebar-member"
+                    >
+                      <div className="sidebar-avatar">
+                        {getInitial(
+                          member.raw_name ||
+                            member.name
+                        )}
+                      </div>
+
+                      <div className="sidebar-member-info">
+                        <strong>
+                          {member.raw_name ||
+                            member.name}
+                        </strong>
+
+                        <span>
+                          {member.is_host
+                            ? "Host"
+                            : "Member"}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                )}
+              </div>
+            </div>
+
+
+            <div className="sidebar-divider" />
+
+
+            {/* ADD MUSIC */}
+
+            <div className="sidebar-section upload-section">
+              <div className="sidebar-section-head">
+                <span>
+                  Add Music
+                </span>
+              </div>
+
 
               <input
                 ref={
                   fileInputRef
                 }
-
+                className="sidebar-file-input"
                 type="file"
-
                 accept=".mp3,.wav,.ogg,.m4a,audio/*"
-
                 onChange={
                   handleFileChange
                 }
@@ -2023,99 +2873,173 @@ function App() {
 
 
               <button
-                className="primary-button"
-
+                className="btn btn-primary full-btn sidebar-upload-btn"
                 onClick={
                   uploadSong
                 }
-
                 disabled={
                   isUploading
                 }
               >
-
                 {isUploading
-                  ?
-                  "Uploading..."
-                  :
-                  "Upload Song"}
-
+                  ? "Uploading..."
+                  : "+ Add to Queue"}
               </button>
 
+
+              {uploadMessage && (
+                <p className="sidebar-message">
+                  {
+                    uploadMessage
+                  }
+                </p>
+              )}
             </div>
 
 
-            {uploadMessage && (
+            {/* SETTINGS */}
 
-              <p className="upload-message">
-                {uploadMessage}
-              </p>
-
-            )}
-
-          </section>
+            <div className="sidebar-bottom settings-section">
+              <div className="sidebar-divider" />
 
 
-          <section className="player-section">
+              <div className="sidebar-section-head settings-title">
+                <span>
+                  Room Settings
+                </span>
+              </div>
 
-            <div className="section-heading">
 
-              <h3>
-                Synchronized Player
-              </h3>
+              <div className="simple-setting">
+                <div>
+                  <strong>
+                    Room Access
+                  </strong>
 
-              <span className="sync-badge">
-                LIVE
+                  <span>
+                    {isRoomLocked
+                      ? "Locked"
+                      : "Open"}
+                  </span>
+                </div>
+
+                {isHost && (
+                  <button
+                    className="text-action"
+                    onClick={
+                      changeRoomLock
+                    }
+                  >
+                    {isRoomLocked
+                      ? "Unlock"
+                      : "Lock"}
+                  </button>
+                )}
+              </div>
+
+
+              <div className="simple-setting playback-setting">
+                <div>
+                  <strong>
+                    Playback
+                  </strong>
+
+                  {!isHost && (
+                    <span>
+                      {playbackControlMode ===
+                      "host_only"
+                        ? "Host only"
+                        : "Everyone"}
+                    </span>
+                  )}
+                </div>
+
+
+                {isHost && (
+                  <select
+                    value={
+                      playbackControlMode
+                    }
+                    onChange={(
+                      event
+                    ) =>
+                      changePlaybackMode(
+                        event.target.value
+                      )
+                    }
+                  >
+                    <option value="everyone">
+                      Everyone
+                    </option>
+
+                    <option value="host_only">
+                      Host only
+                    </option>
+                  </select>
+                )}
+              </div>
+            </div>
+          </aside>
+
+
+          {/* =============================================
+              CENTER PLAYER
+          ============================================= */}
+
+          <section className="center-player">
+            <div className="player-status-row">
+              <span className="player-small-label">
+                NOW PLAYING
               </span>
 
+              <span className="sync-inline">
+                <span className="dot-green" />
+
+                {
+                  syncQuality
+                }
+              </span>
             </div>
 
 
             {!currentSong ? (
-
-              <div className="player-empty">
-
-                <p>
-                  Select a song from
-                  the shared queue.
-                </p>
-
-              </div>
-
-            ) : (
-
-              <div className="player">
-
-                <div className="now-playing">
-
-                  <div className="music-icon">
+              <div className="center-empty-player">
+                <div className="album-placeholder">
+                  <div className="album-inner">
                     ♪
                   </div>
+                </div>
 
+                <h2>
+                  Nothing playing yet
+                </h2>
 
-                  <div className="now-playing-info">
-
-                    <small>
-                      Now Playing
-                    </small>
-
-                    <strong>
-                      {currentSong.title}
-                    </strong>
-
-                    <span>
-
-                      Uploaded by{" "}
-
-                      {
-                        currentSong
-                          .uploaded_by
-                      }
-
-                    </span>
-
+                <p>
+                  Choose a song from the queue or add music to start listening together.
+                </p>
+              </div>
+            ) : (
+              <div className="center-player-content">
+                <div className="album-placeholder active">
+                  <div className="album-inner">
+                    ♪
                   </div>
+                </div>
 
+
+                <div className="center-song-info">
+                  <h2>
+                    {
+                      currentSong.title
+                    }
+                  </h2>
+
+                  <p>
+                    Uploaded by{" "}
+                    {
+                      currentSong.uploaded_by
+                    }
+                  </p>
                 </div>
 
 
@@ -2123,468 +3047,554 @@ function App() {
                   ref={
                     audioRef
                   }
-
-                  src={
-                    `${API_BASE_URL}${currentSong.url}`
-                  }
-
+                  src={`${API_BASE_URL}${currentSong.url}`}
                   preload="auto"
-
                   onLoadedMetadata={
                     handleLoadedMetadata
                   }
-
                   onTimeUpdate={
                     handleTimeUpdate
                   }
-
                   onPlay={
                     handleAudioPlay
                   }
-
                   onPause={
                     handleAudioPause
                   }
-
                   onEnded={
                     handleSongEnded
                   }
-
                   onError={
                     handleAudioError
                   }
                 />
 
 
-                <div className="progress-area">
-
-                  <span>
-                    {formatTime(
-                      currentTime
-                    )}
-                  </span>
-
-
+                <div className="modern-progress">
                   <input
-                    className="seek-slider"
-
+                    className="timeline-slider"
                     type="range"
-
                     min="0"
-
                     max={
-                      duration || 0
+                      duration ||
+                      0
                     }
-
                     step="0.1"
-
-                    value={
-                      Math.min(
-                        currentTime,
-                        duration || 0
-                      )
-                    }
-
+                    value={Math.min(
+                      currentTime,
+                      duration || 0
+                    )}
                     onChange={
                       handleSeek
                     }
-
                     disabled={
-                      !duration
+                      !duration ||
+                      !canControlPlayback
                     }
                   />
 
 
-                  <span>
-                    {formatTime(
-                      duration
-                    )}
-                  </span>
+                  <div className="progress-times">
+                    <span>
+                      {formatTime(
+                        currentTime
+                      )}
+                    </span>
 
+                    <span>
+                      {formatTime(
+                        duration
+                      )}
+                    </span>
+                  </div>
                 </div>
 
 
-                <div className="player-controls">
-
+                <div className="modern-controls">
                   <button
-                    className="control-button"
-
+                    className="control-button side-control"
                     onClick={
                       playPreviousSong
                     }
-
                     disabled={
-                      queue.length === 0
+                      queue.length ===
+                        0 ||
+                      !canControlPlayback
                     }
+                    title="Previous"
                   >
-                    Previous
+                    ◀
                   </button>
 
 
                   <button
-                    className="play-button"
-
+                    className="control-button main-control"
                     onClick={
                       togglePlayPause
                     }
+                    disabled={
+                      !canControlPlayback
+                    }
+                    title={
+                      isPlaying
+                        ? "Pause"
+                        : "Play"
+                    }
                   >
-
                     {isPlaying
-                      ?
-                      "Pause"
-                      :
-                      "Play"}
-
+                      ? "Ⅱ"
+                      : "▶"}
                   </button>
 
 
                   <button
-                    className="control-button"
-
+                    className="control-button side-control"
                     onClick={
                       playNextSong
                     }
-
                     disabled={
-                      queue.length === 0
+                      queue.length ===
+                        0 ||
+                      !canControlPlayback
                     }
+                    title="Next"
                   >
-                    Next
+                    ▶
                   </button>
-
                 </div>
 
+
+                {playerMessage && (
+                  <p className="center-player-message">
+                    {
+                      playerMessage
+                    }
+                  </p>
+                )}
               </div>
-
             )}
-
-
-            {playerMessage && (
-
-              <p className="player-message">
-                {playerMessage}
-              </p>
-
-            )}
-
           </section>
 
 
-          <section className="queue-section">
+          {/* =============================================
+              QUEUE
+          ============================================= */}
 
-            <div className="section-heading">
+          <aside className="queue-panel">
+            <div className="queue-panel-header">
+              <div>
+                <span className="player-small-label">
+                  PLAYLIST
+                </span>
 
-              <h3>
-                Shared Queue
-              </h3>
+                <h2>
+                  Up Next
+                </h2>
+              </div>
 
-              <span>
-                {queue.length}
+              <span className="queue-number">
+                {
+                  queue.length
+                }
               </span>
-
             </div>
 
 
-            {queue.length === 0 ? (
+            {queue.length ===
+            0 ? (
+              <div className="modern-queue-empty">
+                <div>
+                  ♪
+                </div>
 
-              <p className="empty-message">
-                No songs added yet.
-              </p>
+                <strong>
+                  Queue is empty
+                </strong>
 
+                <span>
+                  Add music to start listening.
+                </span>
+              </div>
             ) : (
-
-              <div className="queue-list">
-
+              <div className="modern-queue-list">
                 {queue.map(
                   (
                     song,
                     index
                   ) => {
-
                     const selected =
-                      currentSong?.id
-                      ===
+                      currentSong
+                        ?.id ===
                       song.id;
 
-
                     return (
-
-                      <button
-                        type="button"
-
+                      <div
                         key={
                           song.id
                         }
-
                         className={
                           selected
-                            ?
-                            "queue-item queue-item-active"
-                            :
-                            "queue-item"
-                        }
-
-                        onClick={() =>
-                          selectSong(
-                            song
-                          )
+                            ? "modern-queue-item active"
+                            : "modern-queue-item"
                         }
                       >
-
-                        <div className="queue-number">
-
-                          {selected
-                            ?
-                            "♪"
-                            :
-                            index + 1}
-
-                        </div>
-
-
-                        <div className="song-information">
-
-                          <strong>
-                            {song.title}
-                          </strong>
-
-                          <span>
-
-                            Uploaded by{" "}
-
-                            {
-                              song.uploaded_by
-                            }
-
-                          </span>
-
-                        </div>
+                        <button
+                          type="button"
+                          className="queue-song-button"
+                          onClick={() =>
+                            selectSong(
+                              song
+                            )
+                          }
+                          disabled={
+                            !canControlPlayback
+                          }
+                        >
+                          <div className="queue-song-number">
+                            {selected
+                              ? "♪"
+                              : String(
+                                  index +
+                                    1
+                                ).padStart(
+                                  2,
+                                  "0"
+                                )}
+                          </div>
 
 
-                        <span className="queue-action">
+                          <div className="queue-song-details">
+                            <strong>
+                              {
+                                song.title
+                              }
+                            </strong>
 
-                          {selected
-                            ?
-                            "Selected"
-                            :
-                            "Select"}
+                            <span>
+                              {
+                                song.uploaded_by
+                              }
+                            </span>
+                          </div>
+                        </button>
 
-                        </span>
 
-                      </button>
+                        {isHost && (
+                          <div className="queue-menu">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                moveSong(
+                                  song,
+                                  "up"
+                                )
+                              }
+                              disabled={
+                                index ===
+                                0
+                              }
+                              title="Move up"
+                            >
+                              ↑
+                            </button>
 
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                moveSong(
+                                  song,
+                                  "down"
+                                )
+                              }
+                              disabled={
+                                index ===
+                                queue.length -
+                                  1
+                              }
+                              title="Move down"
+                            >
+                              ↓
+                            </button>
+
+
+                            <button
+                              type="button"
+                              className="remove-queue-btn"
+                              onClick={() =>
+                                removeSong(
+                                  song
+                                )
+                              }
+                              title="Remove"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     );
-
                   }
                 )}
-
               </div>
-
             )}
-
-          </section>
-
-
-          <section className="sync-note">
-
-            <strong>
-              Precision synchronization active
-            </strong>
-
-            <p>
-              Playback uses server-time
-              scheduling and automatic drift
-              correction to keep connected
-              players aligned.
-            </p>
-
-          </section>
-
+          </aside>
         </section>
 
+
+        {/* FOOTER */}
+
+        <footer className="room-footer">
+          <span className="dot-green" />
+
+          <span>
+            Synchronized in real time
+          </span>
+
+          <span className="footer-separator">
+            •
+          </span>
+
+          <span>
+            {isRoomLocked
+              ? "Room locked"
+              : "Room open"}
+          </span>
+
+          <span className="footer-separator">
+            •
+          </span>
+
+          <span>
+            {playbackControlMode ===
+            "host_only"
+              ? "Host controls playback"
+              : "Everyone can control playback"}
+          </span>
+        </footer>
       </main>
     );
   }
 
 
-  // =====================================================
-  // HOME
-  // =====================================================
+  /* =======================================================
+     HOME PAGE
+  ======================================================= */
 
   return (
-    <main className="app">
-
-      <section className="hero">
+    <main className="home-page">
+      <section className="home-hero">
+        <div className="home-logo">
+          ♪
+        </div>
 
         <h1>
           Sangeet Sangai
         </h1>
 
-        <p className="subtitle">
-          Listen together,
-          wherever you are.
-        </p>
-
-      </section>
-
-
-      <section className="status-section">
-
         <p>
-
-          Backend Status:
-
-          <strong>
-            {" "}
-            {backendMessage}
-          </strong>
-
+          Create a room, share the room code, upload songs, and listen together in real time.
         </p>
-
       </section>
 
 
-      <section className="identity-section">
+      <section className="home-shell">
+        <div className="home-top">
+          <div className="field-block">
+            <label>
+              Your Name
+            </label>
 
-        <h2>
-          Your Name
-        </h2>
-
-        <p>
-          Enter a name other members
-          can see.
-        </p>
-
-
-        <input
-          className="name-input"
-
-          type="text"
-
-          placeholder="Enter your name"
-
-          maxLength={30}
-
-          value={
-            displayName
-          }
-
-          onChange={(event) =>
-            setDisplayName(
-              event.target.value
-            )
-          }
-        />
-
-      </section>
+            <input
+              type="text"
+              placeholder="Enter your display name"
+              maxLength={
+                30
+              }
+              value={
+                displayName
+              }
+              onChange={(
+                event
+              ) =>
+                setDisplayName(
+                  event.target.value
+                )
+              }
+            />
+          </div>
 
 
-      <section className="room-section">
+          <div className="backend-box">
+            <span className="dot-green" />
 
-        <h2>
-          Create a Music Room
-        </h2>
-
-        <p>
-          Create a temporary room
-          and share its code.
-        </p>
-
-
-        <button
-          className="primary-button"
-
-          onClick={
-            createRoom
-          }
-
-          disabled={
-            isCreatingRoom
-          }
-        >
-
-          {isCreatingRoom
-            ?
-            "Creating..."
-            :
-            "Create Room"}
-
-        </button>
-
-
-        {roomMessage && (
-
-          <p className="room-message">
-            {roomMessage}
-          </p>
-
-        )}
-
-      </section>
-
-
-      <section className="join-section">
-
-        <h2>
-          Join a Music Room
-        </h2>
-
-
-        <div className="join-form">
-
-          <input
-            type="text"
-
-            placeholder="Room code"
-
-            maxLength={6}
-
-            value={
-              joinCode
-            }
-
-            onChange={(event) =>
-              setJoinCode(
-                event.target.value
-                  .toUpperCase()
-              )
-            }
-          />
-
-
-          <button
-            className="primary-button"
-
-            onClick={
-              joinRoom
-            }
-
-            disabled={
-              isJoiningRoom
-            }
-          >
-
-            {isJoiningRoom
-              ?
-              "Joining..."
-              :
-              "Join Room"}
-
-          </button>
-
+            <span>
+              {
+                backendMessage
+              }
+            </span>
+          </div>
         </div>
 
 
-        {joinMessage && (
+        <div className="home-grid">
+          {/* CREATE ROOM */}
 
-          <p className="join-message">
-            {joinMessage}
-          </p>
+          <section className="home-card">
+            <span className="eyebrow">
+              Step 1
+            </span>
 
-        )}
+            <h2>
+              Create Room
+            </h2>
 
+            <p>
+              Start a new music room and invite others with a generated code.
+            </p>
+
+
+            <div className="form-group">
+              <label>
+                Room Name
+              </label>
+
+              <input
+                type="text"
+                placeholder="Optional room name"
+                maxLength={
+                  40
+                }
+                value={
+                  newRoomName
+                }
+                onChange={(
+                  event
+                ) =>
+                  setNewRoomName(
+                    event.target.value
+                  )
+                }
+              />
+            </div>
+
+
+            <div className="form-group">
+              <label>
+                Maximum Members
+              </label>
+
+              <input
+                type="number"
+                min="2"
+                max="20"
+                value={
+                  newRoomMaxMembers
+                }
+                onChange={(
+                  event
+                ) =>
+                  setNewRoomMaxMembers(
+                    clampMaxMembers(
+                      event.target.value
+                    )
+                  )
+                }
+              />
+            </div>
+
+
+            <button
+              className="btn btn-primary full-btn"
+              onClick={
+                createRoom
+              }
+              disabled={
+                isCreatingRoom
+              }
+            >
+              {isCreatingRoom
+                ? "Creating..."
+                : "Create Room"}
+            </button>
+
+
+            {roomMessage && (
+              <p className="message-text error-text">
+                {
+                  roomMessage
+                }
+              </p>
+            )}
+          </section>
+
+
+          {/* JOIN ROOM */}
+
+          <section className="home-card">
+            <span className="eyebrow">
+              Step 2
+            </span>
+
+            <h2>
+              Join Room
+            </h2>
+
+            <p>
+              Enter a room code shared by your friend and join instantly.
+            </p>
+
+
+            <div className="form-group">
+              <label>
+                Room Code
+              </label>
+
+              <input
+                type="text"
+                placeholder="Enter room code"
+                maxLength={
+                  6
+                }
+                value={
+                  joinCode
+                }
+                onChange={(
+                  event
+                ) =>
+                  setJoinCode(
+                    event.target.value.toUpperCase()
+                  )
+                }
+              />
+            </div>
+
+
+            <button
+              className="btn btn-secondary-dark full-btn"
+              onClick={
+                joinRoom
+              }
+              disabled={
+                isJoiningRoom
+              }
+            >
+              {isJoiningRoom
+                ? "Joining..."
+                : "Join Room"}
+            </button>
+
+
+            {joinMessage && (
+              <p className="message-text error-text">
+                {
+                  joinMessage
+                }
+              </p>
+            )}
+          </section>
+        </div>
       </section>
-
     </main>
   );
 }

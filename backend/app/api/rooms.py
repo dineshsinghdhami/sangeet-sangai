@@ -6,6 +6,10 @@ from fastapi import (
     APIRouter,
     HTTPException,
 )
+from pydantic import (
+    BaseModel,
+    Field,
+)
 
 
 router = APIRouter(
@@ -14,16 +18,17 @@ router = APIRouter(
 )
 
 
-# =========================================================
-# TEMPORARY ACTIVE ROOMS
-# =========================================================
-
 rooms = {}
 
 
-# =========================================================
-# GENERATE UNIQUE ROOM CODE
-# =========================================================
+class CreateRoomRequest(BaseModel):
+    name: str = ""
+    max_members: int = Field(
+        default=8,
+        ge=2,
+        le=20,
+    )
+
 
 def generate_room_code(
     length: int = 6,
@@ -45,15 +50,23 @@ def generate_room_code(
             return code
 
 
-# =========================================================
-# CREATE ROOM
-# =========================================================
-
 @router.post("/create")
-def create_room():
+def create_room(
+    request: CreateRoomRequest,
+):
     room_code = (
         generate_room_code()
     )
+
+    room_name = (
+        request.name
+        .strip()
+    )
+
+    if not room_name:
+        room_name = "Music Room"
+
+    room_name = room_name[:40]
 
     rooms[
         room_code
@@ -61,36 +74,42 @@ def create_room():
         "code":
             room_code,
 
+        "name":
+            room_name,
+
+        "max_members":
+            request.max_members,
+
         "members":
             [],
 
         "queue":
             [],
 
-        # First connected member becomes host.
         "host_member_id":
             None,
 
         "host_name":
             None,
 
-        # Selected song.
+        "playback_control_mode":
+            "everyone",
+
+        "is_locked":
+            False,
+
         "current_song":
             None,
 
-        # Playback state.
         "is_playing":
             False,
 
-        # Base playback position.
         "current_position":
             0.0,
 
-        # Server time when playback started.
         "playback_started_at":
             None,
 
-        # Last playback update.
         "playback_updated_at":
             time.time(),
     }
@@ -108,10 +127,6 @@ def create_room():
             ],
     }
 
-
-# =========================================================
-# GET EFFECTIVE PLAYBACK POSITION
-# =========================================================
 
 def get_effective_position(
     room: dict,
@@ -156,10 +171,6 @@ def get_effective_position(
         elapsed,
     )
 
-
-# =========================================================
-# GET ROOM
-# =========================================================
 
 @router.get("/{room_code}")
 def get_room(
